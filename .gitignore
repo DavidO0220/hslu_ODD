@@ -1,1 +1,19 @@
+# Virtuelle Umgebungen (nie ins Repository)
+.venv/
+venv/
 myenv/
+env/
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Ausgaben der App
+output/
+*.log
+
+# Editor und System
+.vscode/settings.json
+.DS_Store
+Thumbs.db
