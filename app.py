@@ -7,11 +7,16 @@ Die Oberfläche enthält keine IFC-Logik. Sie ruft nur Funktionen aus core/ auf.
 Zwei Eigenheiten von Streamlit bestimmen den Aufbau:
 - Bei jedem Klick läuft dieses Skript von oben neu durch. Das Modell wird
   deshalb mit st.cache_resource nur einmal geladen.
-- Die vier Schritte sind Reiter (st.tabs). Streamlit führt alle Reiter bei
+- Die Schritte sind Reiter (st.tabs). Streamlit führt alle Reiter bei
   jedem Durchlauf aus, so bleiben Eingaben erhalten, wenn man zwischen den
   Schritten wechselt.
 
-Im Schritt «Bearbeiten» steht neben der Tabelle der 3D-Viewer (viewer/).
+Alle offenen Änderungen liegen in einer gemeinsamen Liste (core/pending.py,
+in st.session_state["pending"]). Die Tabelle in «Bearbeiten» und das Pop-up
+im Reiter «3D-Modell» schreiben beide hinein, «Prüfen» und «Speichern» lesen
+daraus. Ein Wechsel der Klasse verwirft deshalb keine Eingaben.
+
+Im Schritt «Bearbeiten» steht neben der Tabelle der kleine 3D-Viewer (viewer/).
 Die bearbeitbare Tabelle meldet keine angeklickte Zeile zurück. Bauteile
 werden deshalb über die Häkchen-Spalte «3D» in der Tabelle angewählt.
 
@@ -25,11 +30,11 @@ import pandas as pd
 import streamlit as st
 
 import viewer
-from core import changelog, diff, geometry, ifc_reader, ifc_writer
+from core import changelog, geometry, ifc_reader, ifc_writer, pending
 from core.display import NO, YES, bool_columns, to_display
-from core.schema import (COL_GLOBAL_ID, COL_MESSAGE, COL_NAME, COL_NEW, COL_OLD, COL_PROPERTY, COL_STOREY,
-                         COL_VALID, LOCKED_COLUMNS)
-from core.validator import load_rules, validate
+from core.schema import (COL_CLASS, COL_GLOBAL_ID, COL_MESSAGE, COL_NAME, COL_NEW, COL_OLD, COL_PROPERTY,
+                         COL_PSET, COL_STOREY, COL_VALID, LOCKED_COLUMNS)
+from core.validator import load_rules
 
 TEST_MODEL = Path(__file__).resolve().parent / "data" / "testmodell.ifc"
 COL_SHOW = "3D"   # Häkchen-Spalte: Bauteil im Viewer zeigen. Nur Oberfläche, wird nie geschrieben.
@@ -59,6 +64,35 @@ def get_rules() -> dict:
 def get_meshes(file_bytes: bytes) -> list[dict]:
     """Geometrie nur einmal pro Datei berechnen, das dauert bei grossen Modellen."""
     return geometry.load_meshes(get_model(file_bytes))
+
+
+@st.cache_resource(show_spinner="Eigenschaften werden gelesen …")
+def get_properties(file_bytes: bytes) -> dict:
+    """Alle Eigenschaften aller Bauteile, für das Pop-up im Reiter «3D-Modell»."""
+    return ifc_reader.element_properties(get_model(file_bytes))
+
+
+def change_store(file_key) -> dict:
+    """Die gemeinsame Änderungsliste. Eine neue Datei beginnt mit einer leeren Liste."""
+    if "pending" not in st.session_state or st.session_state.get("store_file") != file_key:
+        st.session_state["store_file"] = file_key
+        st.session_state["pending"] = {}
+        st.session_state["editor_rev"] = 0
+    return st.session_state["pending"]
+
+
+def restart_editor() -> None:
+    """Tabelleneditor neu aufsetzen, damit er Änderungen von aussen (3D, Verwerfen) zeigt."""
+    st.session_state["editor_rev"] = st.session_state.get("editor_rev", 0) + 1
+
+
+def pending_for_viewer(store: dict, checked: pd.DataFrame) -> list[dict]:
+    """Offene Änderungen mit Prüfergebnis in der Form für das Pop-up (Werte in Anzeigeform)."""
+    result = {(r[COL_GLOBAL_ID], r[COL_PSET], r[COL_PROPERTY]): (bool(r[COL_VALID]), r[COL_MESSAGE] or "")
+              for _, r in checked.iterrows()}
+    return [{"guid": g, "pset": ps, "prop": pr, "old": e[COL_OLD], "new": e[COL_NEW],
+             "valid": result.get((g, ps, pr), (True, ""))[0], "msg": result.get((g, ps, pr), (True, ""))[1]}
+            for (g, ps, pr), e in store.items()]
 
 
 def _text(value) -> str:
@@ -146,7 +180,8 @@ with st.sidebar:
 
 st.title("IFC-Property-Editor")
 st.caption("Properties von IFC-Modellen im Browser ergänzen, prüfen und zurückschreiben")
-tab_load, tab_edit, tab_check, tab_save = st.tabs(["1  Laden", "2  Bearbeiten", "3  Prüfen", "4  Speichern"])
+tab_load, tab_edit, tab_3d, tab_check, tab_save = st.tabs(
+    ["1  Laden", "2  Bearbeiten", "3  3D-Modell", "4  Prüfen", "5  Speichern"])
 
 # =============================== 1 Laden =====================================
 with tab_load:
@@ -160,6 +195,7 @@ with tab_load:
         ifc_bytes, file_name = TEST_MODEL.read_bytes(), TEST_MODEL.name
 
     model = table = None
+    store = change_store((file_name, len(ifc_bytes)) if ifc_bytes is not None else None)
     if ifc_bytes is None:
         st.info("Noch keine Datei geladen.")
     else:
@@ -205,7 +241,8 @@ with tab_edit:
             # Häkchen-Spalte vorne, Ja/Nein-Properties als Auswahlfeld, alle anderen als freie Texteingabe
             config = {col: st.column_config.SelectboxColumn(col, options=[YES, NO]) for col in bool_columns(raw_table)}
             config[COL_SHOW] = st.column_config.CheckboxColumn(COL_SHOW, help="Bauteil im 3D-Viewer zeigen", width="small")
-            with_show = table.copy()
+            shown = pending.apply(table, store, pset)      # Tabelle mit den offenen Änderungen
+            with_show = shown.copy()
             with_show.insert(0, COL_SHOW, False)
             edited_full = st.data_editor(
                 with_show,
@@ -213,48 +250,84 @@ with tab_edit:
                 hide_index=True,
                 column_config=config,
                 num_rows="fixed",
-                key=f"editor::{'::'.join(map(str, st.session_state['context']))}",
+                key=f"editor::{'::'.join(map(str, st.session_state['context']))}::{st.session_state['editor_rev']}",
             )
             selected_ids = list(edited_full.loc[edited_full[COL_SHOW] == True, COL_GLOBAL_ID])  # noqa: E712
             edited = edited_full.drop(columns=[COL_SHOW])   # die Häkchen sind keine Änderung am Modell
+            pending.merge_edits(store, table, shown, edited, ifc_class, pset)
+            others = sum(1 for (_, ps, _), e in store.items() if e[COL_CLASS] != ifc_class or ps != pset)
+            if others:
+                st.caption(f"Dazu {others} offene Änderung(en) in anderen Klassen oder Property-Sets, siehe «Prüfen».")
         if right is not None:
             with right:
                 show_3d_panel(ifc_bytes, edited, selected_ids, ifc_class)
 
-# =============================== 3 Prüfen ====================================
+# =============================== 3 3D-Modell =================================
+with tab_3d:
+    if model is None:
+        st.info("Zuerst im Schritt «Laden» eine Datei laden.")
+    else:
+        try:
+            meshes = get_meshes(ifc_bytes)
+        except Exception as exc:
+            meshes = []
+            st.warning(f"Die 3D-Geometrie konnte nicht berechnet werden: {exc}")
+        if meshes:
+            props = get_properties(ifc_bytes)
+            checked_now = pending.validate_all(store, get_rules())
+            value = viewer.model3d(meshes, props, get_rules(), pending_for_viewer(store, checked_now),
+                                   model_id=f"{file_name}:{len(ifc_bytes)}", height=720)
+            # Neue Eingabe aus dem Pop-up in die gemeinsame Liste übernehmen
+            if value and value.get("nonce") != st.session_state.get("model3d_nonce"):
+                st.session_state["model3d_nonce"] = value.get("nonce")
+                info = props.get(value.get("guid"))
+                if info is not None:
+                    for c in value.get("changes", []):
+                        original = info["psets"].get(c["pset"], {}).get(c["prop"])
+                        pending.put(store, value["guid"], info["name"], info["cls"], c["pset"], c["prop"],
+                                    original, c.get("value"))
+                    restart_editor()
+                    st.rerun()
+            n_bad = int((~checked_now[COL_VALID].astype(bool)).sum()) if len(checked_now) else 0
+            c1, c2 = st.columns([3, 1])
+            c1.caption(f"Offene Änderungen: {len(store)}, davon {n_bad} mit Fehler. "
+                       "Bauteil anklicken, Werte im Fenster ändern, «Übernehmen». Geprüft und gespeichert wird in «Prüfen» und «Speichern».")
+            if store and c2.button("Alle offenen Änderungen verwerfen"):
+                store.clear()
+                restart_editor()
+                st.rerun()
+
+# =============================== 4 Prüfen ====================================
 validated = None
 with tab_check:
-    if edited is None:
-        st.info("Zuerst im Schritt «Bearbeiten» Werte ändern.")
+    if not store:
+        st.info("Noch keine Änderungen. Werte im Schritt «Bearbeiten» oder im «3D-Modell» ändern.")
     else:
-        changes = diff.find_changes(table, edited, pset)
-        if changes.empty:
-            st.info("Noch keine Änderungen.")
-        else:
-            validated = validate(changes, ifc_class, get_rules())
-            # Ergebnis aus Schritt 4 verwerfen, sobald sich die Änderungen ändern
-            signature = validated.to_csv(index=False)
-            if st.session_state.get("validated_signature") != signature:
-                st.session_state["validated_signature"] = signature
-                reset_downstream()
-            n_ok = int(validated[COL_VALID].sum())
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Änderungen", len(validated))
-            m2.metric("gültig", n_ok)
-            m3.metric("Fehler", len(validated) - n_ok)
-            for _, row in validated.iterrows():
-                old = "leer" if row[COL_OLD] is None else row[COL_OLD]
-                new = row[COL_NEW]
-                new = "leer" if new is None else (YES if new is True else NO if new is False else new)
-                text = f"**{row[COL_NAME]}** · {row[COL_PROPERTY]}: {old} → {new}"
-                if row[COL_VALID]:
-                    st.success(text + (f"  ·  {row[COL_MESSAGE]}" if row[COL_MESSAGE] else ""))
-                else:
-                    st.error(f"{text}  ·  {row[COL_MESSAGE]}")
-            if n_ok < len(validated):
-                st.caption("Fehlerhafte Änderungen werden nicht gespeichert. Im Schritt «Bearbeiten» korrigieren.")
+        validated = pending.validate_all(store, get_rules())
+        # Ergebnis aus Schritt 5 verwerfen, sobald sich die Änderungen ändern
+        signature = validated.to_csv(index=False)
+        if st.session_state.get("validated_signature") != signature:
+            st.session_state["validated_signature"] = signature
+            reset_downstream()
+        n_ok = int(validated[COL_VALID].sum())
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Änderungen", len(validated))
+        m2.metric("gültig", n_ok)
+        m3.metric("Fehler", len(validated) - n_ok)
+        for _, row in validated.iterrows():
+            old = "leer" if row[COL_OLD] is None else row[COL_OLD]
+            new = row[COL_NEW]
+            new = "leer" if new is None else (YES if new is True else NO if new is False else new)
+            text = f"**{row[COL_NAME]}** · {row[COL_PROPERTY]}: {old} → {new}"
+            where = f"  ·  {row[COL_CLASS]} · {row[COL_PSET]}"
+            if row[COL_VALID]:
+                st.success(text + (f"  ·  {row[COL_MESSAGE]}" if row[COL_MESSAGE] else "") + where)
+            else:
+                st.error(f"{text}  ·  {row[COL_MESSAGE]}{where}")
+        if n_ok < len(validated):
+            st.caption("Fehlerhafte Änderungen werden nicht gespeichert. In «Bearbeiten» oder im «3D-Modell» korrigieren.")
 
-# =============================== 4 Speichern =================================
+# =============================== 5 Speichern =================================
 with tab_save:
     if validated is None or not validated[COL_VALID].any():
         st.info("Es gibt noch keine gültigen Änderungen zum Speichern.")
@@ -288,4 +361,4 @@ with st.sidebar:
     if selected_ids:
         st.write(f"Im 3D angewählt: {len(selected_ids)} Bauteil(e)")
     if validated is not None:
-        st.write(f"Änderungen: {len(validated)} · gültig: {int(validated[COL_VALID].sum())}")
+        st.write(f"Offene Änderungen: {len(validated)} · gültig: {int(validated[COL_VALID].sum())}")

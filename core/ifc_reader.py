@@ -87,3 +87,37 @@ def to_table(model: ifcopenshell.file, ifc_class: str, pset_name: str) -> pd.Dat
     table = pd.DataFrame(rows, columns=columns)
     table = table.astype(object).where(table.notna(), None)
     return table.sort_values([COL_STOREY, COL_NAME], kind="stable").reset_index(drop=True)
+
+
+def _plain(value):
+    """Property-Wert in eine einfache, darstellbare Form bringen (Ja/Nein für Wahrheitswerte)."""
+    if isinstance(value, bool):
+        return "Ja" if value else "Nein"
+    if value is None or isinstance(value, (int, float, str)):
+        return value
+    if isinstance(value, (list, tuple)):
+        return ", ".join(str(v) for v in value)
+    return str(value)
+
+
+def element_properties(model: ifcopenshell.file) -> dict:
+    """Alle Eigenschaften aller Bauteile für das Pop-up im 3D-Viewer.
+
+    Rückgabe: {GlobalId: {"cls", "name", "storey", "psets": {Pset: {Property: Wert}},
+    "qtos": {Qto: {Menge: Wert}}}}. Wie in der Tabelle nur Werte direkt am Bauteil.
+    """
+    def clean(sets):
+        return {name: {k: _plain(v) for k, v in props.items() if k != "id"} for name, props in sets.items()}
+
+    result = {}
+    for element in model.by_type("IfcElement"):
+        if element.is_a("IfcFeatureElement"):
+            continue
+        result[element.GlobalId] = {
+            "cls": element.is_a(),
+            "name": element.Name or "",
+            "storey": storey_name(element),
+            "psets": clean(element_util.get_psets(element, psets_only=True, should_inherit=False)),
+            "qtos": clean(element_util.get_psets(element, qtos_only=True, should_inherit=False)),
+        }
+    return result

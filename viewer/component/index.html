@@ -1,0 +1,564 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>3D-Modell</title>
+<style>
+  :root { --teal: #0f6e56; --accent: #e07b1f; --ok: #2e9b74; --bad: #c8453b; --line: #d0d3da; --muted: #6b6e78; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #eef2f3;
+               font-family: "Source Sans Pro", "Segoe UI", system-ui, sans-serif; color: #31333f; font-size: 13px; }
+  #scene { position: absolute; inset: 0; }
+  button, select, input { font: inherit; color: inherit; }
+  button { border: 1px solid #c9ccd3; background: #fff; border-radius: 6px; padding: 4px 9px; cursor: pointer; }
+  button:hover:not(:disabled) { border-color: var(--teal); color: var(--teal); }
+  button.on { background: var(--teal); border-color: var(--teal); color: #fff; }
+  button:disabled { opacity: .45; cursor: default; }
+  select { border: 1px solid #c9ccd3; background: #fff; border-radius: 6px; padding: 3px 6px; }
+
+  .toolbar { position: absolute; top: 10px; left: 10px; display: flex; flex-direction: column; gap: 6px;
+             max-width: calc(100% - 20px); z-index: 2; }
+  .row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; background: rgba(255,255,255,.9);
+         border: 1px solid #e1e3e8; border-radius: 8px; padding: 5px 7px; width: fit-content; }
+  .row .lbl { color: var(--muted); margin: 0 2px 0 6px; }
+  .row .lbl:first-child { margin-left: 0; }
+  .seg { display: inline-flex; }
+  .seg button { border-radius: 0; margin-left: -1px; }
+  .seg button:first-child { border-radius: 6px 0 0 6px; margin-left: 0; }
+  .seg button:last-child { border-radius: 0 6px 6px 0; }
+  input[type=range] { width: 180px; accent-color: var(--teal); }
+  .val { min-width: 74px; font-variant-numeric: tabular-nums; color: var(--muted); }
+
+  .pop { position: absolute; z-index: 5; background: #fff; border: 1px solid var(--line); border-radius: 8px;
+         box-shadow: 0 6px 18px rgba(0,0,0,.12); padding: 8px 10px; display: none; }
+  .pop label { display: flex; gap: 6px; align-items: center; padding: 2px 0; white-space: nowrap; cursor: pointer; }
+
+  .panel { position: absolute; top: 10px; right: 10px; width: 370px; max-height: calc(100% - 20px); z-index: 4;
+           display: none; flex-direction: column; background: #fff; border: 1px solid var(--line);
+           border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.14); }
+  .panel header { padding: 10px 12px 8px; border-bottom: 1px solid #eceef2; }
+  .panel header .title { display: flex; justify-content: space-between; gap: 8px; align-items: start; }
+  .panel header b { font-size: 15px; }
+  .panel header .sub { color: var(--muted); margin-top: 2px; }
+  .panel header .gid { font-family: Consolas, monospace; font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+  .panel header .acts { display: flex; gap: 6px; margin-top: 7px; }
+  .x { border: none; background: none; font-size: 18px; line-height: 1; padding: 0 2px; color: var(--muted); }
+  .body { overflow-y: auto; padding: 4px 12px 8px; }
+  .set { margin-top: 10px; }
+  .set h4 { margin: 0 0 4px; font-size: 12.5px; color: var(--teal); }
+  .set.ro h4 { color: var(--muted); }
+  .prop { display: grid; grid-template-columns: 1fr 160px 22px; gap: 4px 6px; align-items: center;
+          padding: 4px 0 4px 6px; border-left: 3px solid transparent; }
+  .prop .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .prop .name small { color: var(--muted); }
+  .prop input, .prop select { width: 100%; box-sizing: border-box; border: 1px solid #c9ccd3; border-radius: 5px; padding: 3px 5px; }
+  .prop .ro { color: #444; }
+  .prop.dirty { border-left-color: var(--teal); background: #f2faf7; }
+  .prop.ok { border-left-color: var(--ok); }
+  .prop.bad { border-left-color: var(--bad); }
+  .prop .note { grid-column: 1 / 4; font-size: 11.5px; }
+  .prop.ok .note { color: var(--ok); }
+  .prop.bad .note { color: var(--bad); }
+  .reset { border: none; background: none; padding: 0; color: var(--muted); font-size: 14px; }
+  .panel footer { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-top: 1px solid #eceef2; }
+  .panel footer .status { color: var(--muted); flex: 1; }
+  .primary { background: var(--teal); border-color: var(--teal); color: #fff; }
+  .primary:hover:not(:disabled) { color: #fff; filter: brightness(1.08); }
+
+  .hint { position: absolute; left: 10px; bottom: 10px; background: rgba(255,255,255,.88); border-radius: 6px;
+          padding: 5px 9px; font-size: 12px; color: #555; z-index: 1; }
+  .legend { position: absolute; right: 10px; bottom: 10px; background: rgba(255,255,255,.88); border-radius: 6px;
+            padding: 5px 9px; font-size: 12px; color: #555; display: flex; gap: 10px; z-index: 1; }
+  .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; vertical-align: -1px; }
+  .msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+         color: #666; font-size: 14px; text-align: center; padding: 24px; z-index: 6; background: #eef2f3; }
+</style>
+</head>
+<body>
+<div id="scene"></div>
+
+<div class="toolbar">
+  <div class="row">
+    <button id="fit" title="Kamera auf alle sichtbaren Bauteile">⟲ Ganzes Modell</button>
+    <span class="lbl">Ansicht</span>
+    <span class="seg" id="views"></span>
+    <span class="lbl">Geschoss</span>
+    <select id="storey"></select>
+    <button id="classes-btn" title="Bauteilklassen ein- und ausblenden">Klassen ▾</button>
+  </div>
+  <div class="row">
+    <span class="lbl">Schnitt</span>
+    <select id="cut-mode">
+      <option value="off">kein Schnitt</option>
+      <option value="z">waagrecht (Grundriss)</option>
+      <option value="x">senkrecht, Ebene Nord–Süd</option>
+      <option value="y">senkrecht, Ebene Ost–West</option>
+    </select>
+    <input id="cut-pos" type="range" min="0" max="1" step="0.01" value="0.5" disabled>
+    <span class="val" id="cut-val">–</span>
+    <button id="cut-flip" title="Andere Seite des Schnitts zeigen" disabled>⇄ Seite</button>
+    <select id="cut-storey" title="Grundriss auf Geschoss setzen" style="display:none"></select>
+  </div>
+</div>
+<div class="pop" id="classes-pop"></div>
+
+<div class="panel" id="panel">
+  <header>
+    <div class="title"><b id="p-name"></b><button class="x" id="p-close" title="Schliessen">×</button></div>
+    <div class="sub" id="p-sub"></div>
+    <div class="gid" id="p-gid"></div>
+    <div class="acts">
+      <button id="p-zoom" title="Kamera zum Bauteil, Rest transparent">◎ Hinzoomen</button>
+    </div>
+  </header>
+  <div class="body" id="p-body"></div>
+  <footer>
+    <span class="status" id="p-status"></span>
+    <button id="p-undo" title="Nicht übernommene Eingaben verwerfen" disabled>Verwerfen</button>
+    <button id="p-apply" class="primary" disabled>Übernehmen</button>
+  </footer>
+</div>
+
+<div class="hint">Linke Maustaste: drehen · Rechte: verschieben · Mausrad: zoomen · Klick: Eigenschaften</div>
+<div class="legend">
+  <span><span class="dot" style="background:#e07b1f"></span>ausgewählt</span>
+  <span><span class="dot" style="background:#2e9b74"></span>geändert</span>
+  <span><span class="dot" style="background:#c8453b"></span>Fehler</span>
+</div>
+<div class="msg" id="msg">3D-Modell wird geladen …</div>
+
+<script type="module">
+// ============================================================================
+// Verbindung zu Streamlit (Komponenten-Protokoll, API-Version 1)
+//   Streamlit -> Seite:  "streamlit:render" mit den Argumenten aus Python
+//   Seite -> Streamlit:  componentReady, setFrameHeight, setComponentValue
+// ============================================================================
+const send = (type, data = {}) => window.parent.postMessage({ isStreamlitMessage: true, type, ...data }, "*");
+const sendValue = (value) => send("streamlit:setComponentValue", { value, dataType: "json" });
+
+// three.js als Text laden und als Blob-URL einbinden. So spielt es keine Rolle,
+// mit welchem Dateityp der Server .js-Dateien ausliefert (unter Windows unsicher).
+async function loadThree() {
+  const text = async (path) => {
+    const res = await fetch(path);
+    if (!res.ok) throw new Error(`${path} nicht gefunden (${res.status})`);
+    return res.text();
+  };
+  const blob = (src) => URL.createObjectURL(new Blob([src], { type: "text/javascript" }));
+  const threeUrl = blob(await text("vendor/three.module.min.js"));
+  const orbitUrl = blob((await text("vendor/OrbitControls.js")).replace(/from\s*['"]three['"]/g, `from "${threeUrl}"`));
+  const THREE = await import(threeUrl);
+  const { OrbitControls } = await import(orbitUrl);
+  return { THREE, OrbitControls };
+}
+
+const msg = document.getElementById("msg");
+const libs = loadThree();
+let app = null;
+let heightSent = 0;
+
+window.addEventListener("message", async (event) => {
+  if (!event.data || event.data.type !== "streamlit:render") return;
+  const args = event.data.args || {};
+  if (args.height && args.height !== heightSent) { heightSent = args.height; send("streamlit:setFrameHeight", { height: args.height }); }
+  try {
+    if (!app) app = createApp(await libs);
+    app.render(args);
+    msg.style.display = "none";
+  } catch (err) {
+    console.error(err);
+    msg.style.display = "flex";
+    msg.textContent = "Das 3D-Modell konnte nicht angezeigt werden: " + (err && err.message ? err.message : err);
+  }
+});
+send("streamlit:componentReady", { apiVersion: 1 });
+
+// ============================================================================
+// Viewer
+// ============================================================================
+const COLORS = { IfcWall: 0xd9d6cc, IfcSlab: 0xa9b4b8, IfcDoor: 0x9c6b3c, IfcWindow: 0x7fb8d6, IfcStair: 0xbdb6a8,
+                 IfcColumn: 0xc4c0b4, IfcBeam: 0xc4c0b4, IfcRoof: 0xb08f7a, IfcCovering: 0xd8d2c4, IfcRailing: 0x8d8f94 };
+const CLASS_NAMES = { IfcWall: "Wände", IfcSlab: "Decken", IfcDoor: "Türen", IfcWindow: "Fenster", IfcStair: "Treppen",
+                      IfcColumn: "Stützen", IfcBeam: "Träger", IfcRoof: "Dächer", IfcCovering: "Bekleidungen",
+                      IfcRailing: "Geländer", IfcFurnishingElement: "Möbel", IfcBuildingElementProxy: "Sonstige" };
+const STATE_COLORS = { selected: 0xe07b1f, ok: 0x2e9b74, bad: 0xc8453b };
+const VIEWS = { Iso: [0.55, -1, 0.75], Oben: [0.0001, -0.001, 1], Süd: [0, -1, 0.12], Nord: [0, 1, 0.12],
+                Ost: [1, 0, 0.12], West: [-1, 0, 0.12] };
+const PLAN_HEIGHT = 1.5;   // Grundriss-Schnitt 1.5 m über Geschossunterkante
+const YES = "Ja", NO = "Nein";
+
+const $ = (id) => document.getElementById(id);
+const el = (tag, attrs = {}, ...children) => {
+  const node = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") node.className = v; else if (k.startsWith("on")) node.addEventListener(k.slice(2), v);
+    else if (v !== undefined && v !== null && v !== false) node.setAttribute(k, v === true ? "" : v);
+  }
+  for (const c of children) if (c !== null && c !== undefined) node.append(c);
+  return node;
+};
+const fmt = (v) => (v === null || v === undefined || v === "" ? "" : String(v));
+const keyOf = (guid, pset, prop) => `${guid}\u0001${pset}\u0001${prop}`;
+
+function createApp({ THREE, OrbitControls }) {
+  // --- Szene ---------------------------------------------------------------
+  const holder = $("scene");
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  holder.appendChild(renderer.domElement);
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0xeef2f3);
+  const camera = new THREE.PerspectiveCamera(40, 1.6, 0.05, 5000);
+  camera.up.set(0, 0, 1);
+  scene.add(new THREE.HemisphereLight(0xffffff, 0xc9ccd0, 2.6));
+  const sun = new THREE.DirectionalLight(0xffffff, 1.6); sun.position.set(0.4, -1.0, 1.3); scene.add(sun);
+  const fill = new THREE.DirectionalLight(0xffffff, 0.6); fill.position.set(-1.0, 0.6, 0.4); scene.add(fill);
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true; controls.dampingFactor = 0.12; controls.screenSpacePanning = true;
+
+  const S = {                       // Zustand der Seite
+    modelId: null, meshes: [], byId: new Map(), bounds: new THREE.Box3(), storeys: [],
+    props: {}, rules: {}, pending: new Map(), pendingState: new Map(),
+    storey: "", hiddenClasses: new Set(), selected: null, isolate: false,
+    cut: { mode: "off", pos: 0, flip: false }, dirty: new Map(), sizeReady: false, flight: null,
+  };
+  const plane = new THREE.Plane(new THREE.Vector3(0, 0, -1), 0);
+  let cutOutline = null;
+
+  // --- Grösse: auch wenn der Reiter beim Laden unsichtbar war ----------------
+  function resize() {
+    const w = holder.clientWidth, h = holder.clientHeight;
+    if (!w || !h) return;                         // unsichtbarer Reiter: später nochmals
+    renderer.setSize(w, h);
+    camera.aspect = w / h; camera.updateProjectionMatrix();
+    if (!S.sizeReady && S.meshes.length) { S.sizeReady = true; jump(viewOf(visibleBounds(), VIEWS.Iso, 1.05)); }
+  }
+  new ResizeObserver(resize).observe(holder);
+
+  // --- Kamera ----------------------------------------------------------------
+  function viewOf(box, dirArr, margin = 1.05, minRadius = 0.5) {
+    const dir = new THREE.Vector3(...dirArr).normalize();
+    const center = box.getCenter(new THREE.Vector3());
+    const radius = Math.max(box.getSize(new THREE.Vector3()).length() / 2, minRadius);
+    const aspect = isFinite(camera.aspect) && camera.aspect > 0 ? camera.aspect : 1.6;
+    const vfov = THREE.MathUtils.degToRad(camera.fov);
+    const hfov = 2 * Math.atan(Math.tan(vfov / 2) * aspect);
+    const dist = (radius * margin) / Math.sin(Math.min(vfov, hfov) / 2);
+    return { target: center, position: center.clone().addScaledVector(dir, dist) };
+  }
+  const currentDir = () => camera.position.clone().sub(controls.target).normalize().toArray();
+  function jump(view) { camera.position.copy(view.position); controls.target.copy(view.target); }
+  function flyTo(view, ms = 800) {
+    const p0 = camera.position.clone(), t0 = controls.target.clone(), t = performance.now();
+    S.flight = (now) => {
+      const k = Math.min(1, (now - t) / ms);
+      const e = k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
+      camera.position.lerpVectors(p0, view.position, e);
+      controls.target.lerpVectors(t0, view.target, e);
+      if (k >= 1) S.flight = null;
+    };
+  }
+  function visibleBounds() {
+    const box = new THREE.Box3();
+    for (const m of S.meshes) if (m.visible) box.union(m.geometry.boundingBox);
+    return box.isEmpty() ? S.bounds.clone() : box;
+  }
+
+  // --- Modell aufbauen ---------------------------------------------------------
+  function build(meshes) {
+    for (const m of S.meshes) { scene.remove(m); m.geometry.dispose(); m.material.dispose(); }
+    S.meshes = []; S.byId.clear(); S.bounds.makeEmpty();
+    const storeyMin = new Map();
+    for (const d of meshes) {
+      const geom = new THREE.BufferGeometry();
+      geom.setAttribute("position", new THREE.Float32BufferAttribute(d.v, 3));
+      geom.setIndex(d.f);
+      geom.computeVertexNormals(); geom.computeBoundingBox();
+      const mat = new THREE.MeshLambertMaterial({ flatShading: true, side: THREE.DoubleSide });
+      const mesh = new THREE.Mesh(geom, mat);
+      mesh.userData = { id: d.id, cls: d.cls, name: d.name, storey: d.storey || "" };
+      const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geom, 25),
+        new THREE.LineBasicMaterial({ color: 0x5f5e5a, transparent: true, opacity: 0.55 }));
+      mesh.add(edges); mesh.userData.edges = edges;
+      scene.add(mesh); S.meshes.push(mesh); S.byId.set(d.id, mesh);
+      S.bounds.union(geom.boundingBox);
+      const key = mesh.userData.storey;
+      storeyMin.set(key, Math.min(storeyMin.has(key) ? storeyMin.get(key) : Infinity, geom.boundingBox.min.z));
+    }
+    S.storeys = [...storeyMin.entries()].sort((a, b) => a[1] - b[1]).map(([name, z]) => ({ name, z }));
+    const size = S.bounds.getSize(new THREE.Vector3()).length() || 10;
+    camera.near = size / 2000; camera.far = size * 20; camera.updateProjectionMatrix();
+    controls.maxDistance = size * 5;
+    S.selected = null; S.isolate = false; S.sizeReady = false; closePanel();
+    buildToolbar();
+    resize();
+  }
+
+  // --- Farben, Sichtbarkeit -------------------------------------------------------
+  function paint() {
+    const fade = S.isolate && S.selected ? 0.12 : 1;
+    for (const mesh of S.meshes) {
+      const u = mesh.userData;
+      mesh.visible = (!S.storey || u.storey === S.storey) && !S.hiddenClasses.has(u.cls);
+      const isSel = u.id === S.selected;
+      const state = isSel ? "selected" : S.pendingState.get(u.id);
+      const glass = u.cls === "IfcWindow" && !state;
+      const opacity = isSel ? 1 : (glass ? 0.55 : 1) * fade;
+      mesh.material.color.setHex(state ? STATE_COLORS[state] : (COLORS[u.cls] ?? 0xc8c8c8));
+      mesh.material.emissive.setHex(isSel ? 0x5a2600 : 0x000000);
+      if (mesh.material.transparent !== opacity < 1) { mesh.material.transparent = opacity < 1; mesh.material.needsUpdate = true; }
+      mesh.material.opacity = opacity; mesh.material.depthWrite = opacity >= 1;
+      mesh.renderOrder = isSel ? 10 : 0;
+      u.edges.material.opacity = isSel ? 1 : Math.max(0.06, 0.55 * fade);
+      u.edges.material.color.setHex(isSel ? 0x8a3f00 : 0x5f5e5a);
+    }
+  }
+
+  // --- Schnitt -------------------------------------------------------------------
+  const AXIS = { x: 0, y: 1, z: 2 };
+  function applyCut() {
+    const { mode, pos, flip } = S.cut;
+    if (cutOutline) { scene.remove(cutOutline); cutOutline.geometry.dispose(); cutOutline = null; }
+    if (mode === "off") { renderer.clippingPlanes = []; return; }
+    // Behalten wird die Seite mit Abstand >= 0: normal = -Achse zeigt Werte unterhalb von pos
+    const n = new THREE.Vector3(); n.setComponent(AXIS[mode], flip ? 1 : -1);
+    plane.set(n, flip ? -pos : pos);
+    renderer.clippingPlanes = [plane];
+    // Umriss der Schnittebene, leicht auf die sichtbare Seite versetzt
+    const b = S.bounds, pad = 0.3, off = flip ? 0.004 : -0.004, at = pos + off;
+    const lo = b.min.clone().subScalar(pad), hi = b.max.clone().addScalar(pad);
+    const corners = mode === "z" ? [[lo.x, lo.y, at], [hi.x, lo.y, at], [hi.x, hi.y, at], [lo.x, hi.y, at]]
+                  : mode === "x" ? [[at, lo.y, lo.z], [at, hi.y, lo.z], [at, hi.y, hi.z], [at, lo.y, hi.z]]
+                  : [[lo.x, at, lo.z], [hi.x, at, lo.z], [hi.x, at, hi.z], [lo.x, at, hi.z]];
+    const g = new THREE.BufferGeometry().setFromPoints(corners.map((c) => new THREE.Vector3(...c)));
+    cutOutline = new THREE.LineLoop(g, new THREE.LineBasicMaterial({ color: 0x0f6e56 }));
+    scene.add(cutOutline);
+  }
+  function setCutMode(mode) {
+    const range = $("cut-pos");
+    S.cut.mode = mode;
+    const on = mode !== "off";
+    range.disabled = !on; $("cut-flip").disabled = !on;
+    $("cut-storey").style.display = mode === "z" && S.storeys.length > 1 ? "" : "none";
+    if (on) {
+      const i = AXIS[mode], lo = S.bounds.min.getComponent(i), hi = S.bounds.max.getComponent(i);
+      range.min = lo; range.max = hi; range.step = Math.max((hi - lo) / 400, 0.005);
+      const start = mode === "z" && S.storeys.length ? S.storeys[0].z + PLAN_HEIGHT : (lo + hi) / 2;
+      setCutPos(Math.min(hi, Math.max(lo, start)));
+    } else { $("cut-val").textContent = "–"; applyCut(); }
+  }
+  function setCutPos(value) {
+    S.cut.pos = Number(value);
+    $("cut-pos").value = S.cut.pos;
+    $("cut-val").textContent = `${S.cut.mode} = ${S.cut.pos.toFixed(2)} m`;
+    applyCut();
+  }
+
+  // --- Werkzeugleiste -------------------------------------------------------------
+  function buildToolbar() {
+    const views = $("views"); views.replaceChildren();
+    for (const name of Object.keys(VIEWS))
+      views.append(el("button", { onclick: () => flyTo(viewOf(visibleBounds(), VIEWS[name])) }, name));
+
+    const storey = $("storey"); storey.replaceChildren(el("option", { value: "" }, "alle"));
+    for (const s of S.storeys) storey.append(el("option", { value: s.name }, s.name || "ohne Geschoss"));
+    storey.value = S.storey = "";
+
+    const cutStorey = $("cut-storey");
+    cutStorey.replaceChildren(el("option", { value: "" }, "auf Geschoss …"));
+    for (const s of S.storeys) cutStorey.append(el("option", { value: s.z }, `Grundriss ${s.name || "ohne Geschoss"}`));
+
+    const pop = $("classes-pop"); pop.replaceChildren();
+    const classes = [...new Set(S.meshes.map((m) => m.userData.cls))].sort();
+    for (const cls of classes) {
+      const box = el("input", { type: "checkbox", checked: !S.hiddenClasses.has(cls),
+        onchange: (e) => { e.target.checked ? S.hiddenClasses.delete(cls) : S.hiddenClasses.add(cls); paint(); } });
+      pop.append(el("label", {}, box, `${CLASS_NAMES[cls] || cls}`, el("small", { style: "color:#888" }, ` ${cls}`)));
+    }
+    setCutMode($("cut-mode").value);
+  }
+  $("fit").onclick = () => flyTo(viewOf(visibleBounds(), currentDir()));
+  $("storey").onchange = (e) => { S.storey = e.target.value; paint(); flyTo(viewOf(visibleBounds(), currentDir())); };
+  // Bei einem senkrechten Schnitt auf die Schnittfläche schauen
+  function lookAtCut() {
+    const { mode, flip } = S.cut, sgn = flip ? -1 : 1;
+    const dir = mode === "x" ? [sgn, -0.35, 0.35] : mode === "y" ? [0.35, sgn, 0.35] : null;
+    if (dir) flyTo(viewOf(visibleBounds(), dir));
+  }
+  $("cut-mode").onchange = (e) => { setCutMode(e.target.value); lookAtCut(); };
+  $("cut-pos").oninput = (e) => setCutPos(e.target.value);
+  $("cut-flip").onclick = () => { S.cut.flip = !S.cut.flip; $("cut-flip").classList.toggle("on", S.cut.flip); applyCut(); lookAtCut(); };
+  $("cut-storey").onchange = (e) => {
+    if (e.target.value === "") return;
+    setCutPos(Number(e.target.value) + PLAN_HEIGHT);
+    flyTo(viewOf(visibleBounds(), VIEWS.Oben));
+    e.target.value = "";
+  };
+  $("classes-btn").onclick = (e) => {
+    const pop = $("classes-pop"), r = e.target.getBoundingClientRect();
+    pop.style.left = `${r.left}px`; pop.style.top = `${r.bottom + 4}px`;
+    pop.style.display = pop.style.display === "block" ? "none" : "block";
+  };
+  document.addEventListener("pointerdown", (e) => {
+    if (!e.target.closest("#classes-pop") && e.target.id !== "classes-btn") $("classes-pop").style.display = "none";
+  });
+
+  // --- Klick: Bauteil wählen ------------------------------------------------------
+  const ray = new THREE.Raycaster(), pointer = new THREE.Vector2();
+  let down = null;
+  renderer.domElement.addEventListener("pointerdown", (e) => { down = [e.clientX, e.clientY]; });
+  renderer.domElement.addEventListener("pointerup", (e) => {
+    if (!down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 4) return;
+    const r = renderer.domElement.getBoundingClientRect();
+    pointer.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+    ray.setFromCamera(pointer, camera);
+    const cutOn = renderer.clippingPlanes.length > 0;
+    const hit = ray.intersectObjects(S.meshes.filter((m) => m.visible), false)
+      .find((h) => !cutOn || plane.distanceToPoint(h.point) >= -1e-6);   // weggeschnittene Teile ignorieren
+    select(hit ? hit.object.userData.id : null);
+  });
+  function select(id) {
+    if (S.dirty.size && id !== S.selected && !confirmDiscard()) return;
+    S.selected = id; S.isolate = false; S.dirty.clear();
+    paint();
+    id ? renderPanel() : closePanel();
+  }
+  function confirmDiscard() {
+    // Kein window.confirm (blockiert Streamlit-Iframes): nicht übernommene Eingaben bleiben, Hinweis zeigen
+    $("p-status").textContent = "Erst «Übernehmen» oder «Verwerfen».";
+    return false;
+  }
+
+  // --- Pop-up mit Eigenschaften --------------------------------------------------------
+  function rulesFor(cls) {
+    if (S.rules[cls]) return S.rules[cls];
+    const base = cls.replace(/(StandardCase|ElementedCase)$/, "");
+    return S.rules[base] || {};
+  }
+  function closePanel() { $("panel").style.display = "none"; }
+
+  function renderPanel() {
+    const id = S.selected, p = S.props[id];
+    if (!p) { closePanel(); return; }
+    const rules = rulesFor(p.cls);
+    $("p-name").textContent = p.name || "ohne Name";
+    $("p-sub").textContent = [CLASS_NAMES[p.cls] ? `${CLASS_NAMES[p.cls]} · ${p.cls}` : p.cls, p.storey].filter(Boolean).join(" · ");
+    $("p-gid").textContent = id;
+    $("p-zoom").classList.toggle("on", S.isolate);
+    $("p-zoom").textContent = S.isolate ? "◎ Rest wieder zeigen" : "◎ Hinzoomen";
+
+    const body = $("p-body"); body.replaceChildren();
+    const psetNames = [...new Set([...Object.keys(p.psets), ...Object.keys(rules)])].sort();
+    if (!psetNames.length) body.append(el("p", { style: "color:#888" }, "Dieses Bauteil hat keine Property-Sets."));
+    for (const pset of psetNames) {
+      const have = p.psets[pset] || {}, rule = rules[pset] || {};
+      const set = el("div", { class: "set" }, el("h4", {}, pset + (p.psets[pset] ? "" : "  (fehlt, wird angelegt)")));
+      for (const prop of [...new Set([...Object.keys(have), ...Object.keys(rule)])].sort())
+        set.append(propRow(id, pset, prop, prop in have ? have[prop] : null, rule[prop], prop in have));
+      body.append(set);
+    }
+    for (const [qto, values] of Object.entries(p.qtos || {}).sort()) {
+      const set = el("div", { class: "set ro" }, el("h4", {}, `${qto} (nur Anzeige)`));
+      for (const [k, v] of Object.entries(values).sort())
+        set.append(el("div", { class: "prop" }, el("span", { class: "name" }, k), el("span", { class: "ro" }, fmt(v)), el("span")));
+      body.append(set);
+    }
+    updateFooter();
+    $("panel").style.display = "flex";
+  }
+
+  function propRow(id, pset, prop, original, rule, exists) {
+    const key = keyOf(id, pset, prop);
+    const pend = S.pending.get(key);
+    const current = S.dirty.has(key) ? S.dirty.get(key) : pend ? pend.new : original;
+    const isBool = (rule && rule.type === "bool") || original === YES || original === NO;
+    let input;
+    if ((rule && rule.type === "enum") || isBool) {
+      const options = isBool ? [YES, NO] : [...rule.values];
+      if (fmt(current) && !options.includes(fmt(current))) options.push(fmt(current));   // z. B. ungültiges EI45 anzeigen
+      input = el("select", {}, el("option", { value: "" }, "— leer —"),
+        ...options.map((o) => el("option", { value: o }, o + (isBool || rule.values.includes(o) ? "" : "  (ungültig)"))));
+    } else {
+      input = el("input", { type: "text", placeholder: rule && rule.type === "float" ? "Zahl" : "leer" });
+    }
+    input.value = fmt(current);
+    const row = el("div", { class: "prop" });
+    const onEdit = () => {
+      const base = fmt(pend ? pend.new : original);
+      if (input.value === base) S.dirty.delete(key); else S.dirty.set(key, input.value);
+      row.classList.toggle("dirty", S.dirty.has(key));
+      updateFooter();
+    };
+    input.addEventListener("input", onEdit); input.addEventListener("change", onEdit);
+    const reset = pend || S.dirty.has(key)
+      ? el("button", { class: "reset", title: `Originalwert: ${fmt(original) || "leer"}`, onclick: () => {
+          input.value = fmt(original);
+          if (fmt(original) === fmt(pend ? pend.new : original)) S.dirty.delete(key); else S.dirty.set(key, input.value);
+          row.classList.toggle("dirty", S.dirty.has(key)); updateFooter();
+        } }, "↺")
+      : el("span");
+    const label = el("span", { class: "name", title: prop }, prop, exists ? null : el("small", {}, "  fehlt"));
+    row.append(label, input, reset);
+    if (S.dirty.has(key)) row.classList.add("dirty");
+    else if (pend) {
+      row.classList.add(pend.valid ? "ok" : "bad");
+      const was = fmt(pend.old) || "leer", now = fmt(pend.new) || "leer";
+      row.append(el("span", { class: "note" }, pend.valid ? `✓ ${was} → ${now}` : `✗ ${pend.msg}`));
+    }
+    return row;
+  }
+
+  function updateFooter() {
+    const n = S.dirty.size;
+    $("p-apply").disabled = n === 0; $("p-undo").disabled = n === 0;
+    $("p-apply").textContent = n ? `Übernehmen (${n})` : "Übernehmen";
+    if (n) $("p-status").textContent = "";
+  }
+  $("p-close").onclick = () => { if (S.dirty.size) return confirmDiscard(); select(null); };
+  $("p-undo").onclick = () => { S.dirty.clear(); renderPanel(); $("p-status").textContent = ""; };
+  $("p-apply").onclick = () => {
+    const changes = [...S.dirty.entries()].map(([key, value]) => {
+      const [, pset, prop] = key.split("\u0001");
+      return { pset, prop, value: value === "" ? null : value };
+    });
+    sendValue({ nonce: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, guid: S.selected, changes });
+    S.dirty.clear(); updateFooter();
+    $("p-status").textContent = "Wird geprüft …";
+  };
+  $("p-zoom").onclick = () => {
+    const mesh = S.byId.get(S.selected); if (!mesh) return;
+    S.isolate = !S.isolate; paint(); renderPanel();
+    if (S.isolate) flyTo(viewOf(new THREE.Box3().setFromObject(mesh), currentDir(), 1.3, 1.6));
+  };
+  window.addEventListener("keydown", (e) => { if (e.key === "Escape" && !S.dirty.size) select(null); });
+
+  // --- Zeichnen ----------------------------------------------------------------------
+  renderer.setAnimationLoop((now) => {
+    if (!S.sizeReady) return;
+    if (S.flight) S.flight(now);
+    controls.update();
+    renderer.render(scene, camera);
+  });
+
+  // --- Daten aus Python -----------------------------------------------------------------
+  return {
+    render(args) {
+      if (args.model_id !== S.modelId) {
+        S.modelId = args.model_id;
+        build(args.meshes || []);
+        if (!S.meshes.length) throw new Error("keine Geometrie im Modell");
+      }
+      S.props = args.props || {}; S.rules = args.rules || {};
+      S.pending = new Map(); S.pendingState = new Map();
+      for (const c of args.pending || []) {
+        S.pending.set(keyOf(c.guid, c.pset, c.prop), c);
+        if (!c.valid) S.pendingState.set(c.guid, "bad");
+        else if (S.pendingState.get(c.guid) !== "bad") S.pendingState.set(c.guid, "ok");
+      }
+      paint();
+      if (S.selected && !S.dirty.size) { renderPanel(); $("p-status").textContent = ""; }
+    },
+  };
+}
+</script>
+</body>
+</html>

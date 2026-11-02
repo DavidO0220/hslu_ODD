@@ -33,3 +33,13 @@ def test_no_script_break_from_content():
     html = viewer.build_html([MESH])
     # Genau so viele </script> wie die Vorlage selbst enthält: Inhalte dürfen keinen Block beenden
     assert html.count("</script>") == 3
+
+
+def test_component_files_present():
+    """Die 3D-Komponente lädt three.js zur Laufzeit aus ihrem eigenen Ordner."""
+    folder = viewer.HERE / "component"
+    page = (folder / "index.html").read_text(encoding="utf-8")
+    assert "streamlit:componentReady" in page and "streamlit:setComponentValue" in page
+    for name in ("three.module.min.js", "OrbitControls.js"):
+        assert (folder / "vendor" / name).is_file()
+        assert f"vendor/{name}" in page

@@ -50,21 +50,37 @@ GlobalId, Name und Geschoss lassen sich nicht ändern.
 5. Bei der Innenwand im 1. OG `EI60` eintragen: Die Karte unter dem Viewer zeigt sofort EI60.
 6. Oben im Reiter «Bearbeiten» die Bauteilklasse auf `IfcWindow` stellen:
    Tabelle und Viewer wechseln auf die Fenster, im Reiter «Laden» steht
-   ebenfalls `IfcWindow`. Danach wieder `IfcWall` wählen. Achtung: Ein
-   Klassenwechsel verwirft nicht gespeicherte Eingaben in der Tabelle.
+   ebenfalls `IfcWindow`. Danach wieder `IfcWall` wählen: Die Eingabe EI60
+   ist noch da.
 7. In der Seitenleiste «Bauteil beim Anwählen zeigen» ausschalten: Das Modell
    ist wieder ganz sichtbar, die Häkchen werden ignoriert.
 
-## 3 Prüfen
+## 3 3D-Modell
 
-Erwartet: **2 Änderungen, 1 gültig, 1 Fehler.**
+1. Reiter «3 3D-Modell». Das Gebäude füllt den Reiter.
+2. Ansicht «Oben», dann «Iso». Geschoss «1. OG»: nur dieses Geschoss ist sichtbar, wieder «alle».
+3. Schnitt «waagrecht (Grundriss)», dann «auf Geschoss … → Grundriss EG»:
+   Blick von oben auf das EG, Treppe, Tür und Fenster sind zu sehen.
+   Regler bewegen: Die Schnitthöhe ändert sich. Danach «kein Schnitt».
+4. Auf die Treppe klicken. Pop-up: Pset_StairCommon mit FireRating, IsExternal,
+   RiserHeight, TreadLength. FireRating auf `R90` stellen, «Übernehmen».
+   Erwartet: Die Treppe wird grün, im Pop-up steht «✓ R30 → R90».
+5. Auf ein Fenster klicken, ThermalTransmittance `9` eintragen, «Übernehmen».
+   Erwartet: Das Fenster wird rot, im Pop-up steht «✗ muss zwischen 0.3 und 3.0 liegen».
+   Wert auf `1,1` ändern und übernehmen: Das Fenster wird grün.
+6. Unter dem Viewer steht die Anzahl offener Änderungen.
+
+## 4 Prüfen
+
+Erwartet (nur mit den Eingaben aus Schritt 2): **2 Änderungen, 1 gültig, 1 Fehler.**
+Mit den Eingaben aus dem 3D-Modell kommen sie dazu, jede Zeile zeigt Klasse und Pset.
 
 - grün: Innenwand 120 · FireRating: leer → EI60
 - rot: Aussenwand Nord 300 · FireRating: leer → EI45 · nicht in der Werteliste (EI30, EI60, EI90)
 
-## 4 Speichern
+## 5 Speichern
 
-1. Reiter «4 Speichern», Name für das Protokoll eingeben.
+1. Reiter «5 Speichern», Name für das Protokoll eingeben.
 2. «IFC-Kopie erstellen».
 3. `testmodell_bearbeitet.ifc` und `testmodell_protokoll.csv` herunterladen.
 

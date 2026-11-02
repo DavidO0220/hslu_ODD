@@ -61,12 +61,11 @@ function start({ THREE, OrbitControls }, data) {
   const holder = document.getElementById("scene");
   const renderer = new THREE.WebGLRenderer({ antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-  renderer.setSize(holder.clientWidth, holder.clientHeight);
   holder.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0xeef2f3);
-  const camera = new THREE.PerspectiveCamera(40, holder.clientWidth / holder.clientHeight, 0.05, 5000);
+  const camera = new THREE.PerspectiveCamera(40, 1.6, 0.05, 5000);
   camera.up.set(0, 0, 1);                      // IFC: z zeigt nach oben
   scene.add(new THREE.HemisphereLight(0xffffff, 0xc9ccd0, 2.6));
   const sun = new THREE.DirectionalLight(0xffffff, 1.6);
@@ -156,9 +155,6 @@ function start({ THREE, OrbitControls }, data) {
     };
   }
 
-  const first = overview();
-  camera.position.copy(first.position);
-  controls.target.copy(first.target);
 
   document.getElementById("btn-all").onclick = () => flyTo(overview());
   if (selectedMeshes.length) {
@@ -171,8 +167,26 @@ function start({ THREE, OrbitControls }, data) {
     const btn = document.getElementById("btn-focus");
     btn.style.display = "inline-block";
     btn.onclick = () => flyTo(focusView());
-    setTimeout(() => flyTo(focusView(), 1100), 250);   // vom ganzen Modell zum Bauteil fahren
   }
+
+  // Start erst, wenn die Seite eine Grösse hat. Liegt der Viewer in einem
+  // Reiter, der beim Laden unsichtbar ist, ist die Breite zuerst 0.
+  let ready = false;
+  function resize() {
+    const w = holder.clientWidth, h = holder.clientHeight;
+    if (!w || !h) return;
+    renderer.setSize(w, h);
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+    if (ready) return;
+    ready = true;
+    const first = overview();
+    camera.position.copy(first.position);
+    controls.target.copy(first.target);
+    if (selectedMeshes.length) setTimeout(() => flyTo(focusView(), 1100), 250);   // vom ganzen Modell zur Auswahl
+  }
+  new ResizeObserver(resize).observe(holder);
+  resize();
 
   // --- Klick ohne Ziehen: Bauteil benennen (nur Anzeige) --------------------
   const ray = new THREE.Raycaster(), pointer = new THREE.Vector2(), pick = document.getElementById("pick");
@@ -191,12 +205,8 @@ function start({ THREE, OrbitControls }, data) {
   });
 
   // --- Grösse und Zeichnen -------------------------------------------------
-  window.addEventListener("resize", () => {
-    camera.aspect = holder.clientWidth / holder.clientHeight;
-    camera.updateProjectionMatrix();
-    renderer.setSize(holder.clientWidth, holder.clientHeight);
-  });
   renderer.setAnimationLoop((now) => {
+    if (!ready) return;
     if (flight) flight(now);
     controls.update();
     renderer.render(scene, camera);

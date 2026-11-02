@@ -1,10 +1,13 @@
-"""3D-Viewer für die Oberfläche.
+"""3D-Viewer für die Oberfläche, in zwei Formen.
 
-Die Seite viewer.html zeichnet die Netze aus core/geometry.py mit three.js.
-three.js liegt in viewer/vendor und wird in die Seite eingebettet, die
-Anzeige funktioniert deshalb auch ohne Internetverbindung.
+show():    kleiner Viewer im Reiter «Bearbeiten». Nur Anzeige, die Seite
+           viewer.html wird mit allen Daten als HTML eingebettet.
+model3d(): grosser Viewer im Reiter «3D-Modell» (component/index.html).
+           Eine Streamlit-Komponente mit Rückkanal: Eingaben im Pop-up kommen
+           als Rückgabewert in Python an.
 
-Der Viewer zeigt nur an. Welches Bauteil gewählt ist, entscheidet app.py.
+three.js liegt in viewer/component/vendor. Beide Viewer laden es von dort,
+die Anzeige funktioniert deshalb ohne Internetverbindung.
 """
 
 import json
@@ -13,8 +16,10 @@ from functools import lru_cache
 from pathlib import Path
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 HERE = Path(__file__).resolve().parent
+_model3d = components.declare_component("ifc_model3d", path=str(HERE / "component"))
 _PLACEHOLDER = re.compile(r"__(DATA|THREE|ORBIT)__")
 
 
@@ -23,8 +28,8 @@ def _assets() -> tuple[str, str, str]:
     read = lambda p: p.read_text(encoding="utf-8")  # noqa: E731
     return (
         read(HERE / "viewer.html"),
-        read(HERE / "vendor" / "three.module.min.js"),
-        read(HERE / "vendor" / "OrbitControls.js"),
+        read(HERE / "component" / "vendor" / "three.module.min.js"),
+        read(HERE / "component" / "vendor" / "OrbitControls.js"),
     )
 
 
@@ -59,3 +64,21 @@ def show(meshes: list[dict], selected: list[str] | None = None, transparency: fl
     else:                                # ältere Versionen
         import streamlit.components.v1 as components
         components.html(html, height=height)
+
+
+def model3d(meshes: list[dict], properties: dict, rules: dict, pending: list[dict], model_id: str,
+            height: int = 720, key: str = "model3d"):
+    """Grosser 3D-Viewer mit Navigation, Schnitt und Pop-up zum Bearbeiten.
+
+    meshes:     Netze aus core.geometry.load_meshes
+    properties: alle Eigenschaften pro GlobalId (core.ifc_reader.element_properties)
+    rules:      Regeln aus config/rules.json, für Auswahlfelder im Pop-up
+    pending:    offene Änderungen mit Prüfergebnis, je {guid, pset, prop, old, new, valid, msg}
+    model_id:   wechselt nur mit der Datei, dann baut der Viewer die Szene neu auf
+
+    Rückgabe: None oder die letzte Eingabe aus dem Pop-up
+    {"nonce": ..., "guid": ..., "changes": [{"pset", "prop", "value"}, ...]}.
+    Der Wert bleibt bestehen, bis eine neue Eingabe kommt. Die nonce zeigt, ob er neu ist.
+    """
+    return _model3d(meshes=meshes, props=properties, rules=rules, pending=pending,
+                    model_id=model_id, height=height, key=key, default=None)

@@ -42,16 +42,19 @@ siehe [docs/Durchlauf.md](docs/Durchlauf.md).
 ## Aufbau
 
 ```
-app.py               Oberfläche (Streamlit), vier Reiter: Laden, Bearbeiten, Prüfen, Speichern
-viewer/              3D-Viewer (three.js), wird im Reiter «Bearbeiten» neben der Tabelle gezeigt
-  viewer.html        Seite des Viewers: Szene, Kamera, Hervorhebung
-  vendor/            three.js r169 (MIT-Lizenz), lokal, damit kein Internet nötig ist
+app.py               Oberfläche (Streamlit), fünf Reiter: Laden, Bearbeiten, 3D-Modell, Prüfen, Speichern
+viewer/              3D-Viewer (three.js)
+  viewer.html        kleiner Viewer neben der Tabelle in «Bearbeiten» (nur Anzeige)
+  component/         grosser Viewer im Reiter «3D-Modell»: Streamlit-Komponente mit Rückkanal
+    index.html       Navigation, Schnitt, Pop-up mit Eigenschaften
+    vendor/          three.js r169 (MIT-Lizenz), lokal, damit kein Internet nötig ist
 core/                Kern-Logik, kennt Streamlit nicht
   schema.py          feste Spaltennamen: Vertrag zwischen den Modulen
   ifc_reader.py      IFC laden, Klassen und Psets auflisten, Tabelle bauen
   display.py         Ja/Nein-Werte für die Anzeige aufbereiten
   diff.py            Änderungen zwischen Original und Bearbeitung finden
   validator.py       Änderungen gegen config/rules.json prüfen
+  pending.py         gemeinsame Liste offener Änderungen aus Tabelle und 3D-Modell
   ifc_writer.py      gültige Änderungen in eine IFC-Kopie schreiben
   changelog.py       Protokoll der Änderungen als CSV
   geometry.py        Dreiecksnetze der Bauteile für den 3D-Viewer (IfcOpenShell)
@@ -62,7 +65,11 @@ data/                Testmodell
 .streamlit/          Farben der Oberfläche
 ```
 
-Datenfluss: `Original-IFC → Reader → Tabelle → (Bearbeitung) → Diff → Änderungsliste → Validator → Writer → IFC-Kopie + Protokoll`
+Datenfluss: `Original-IFC → Reader → Tabelle / 3D-Modell → (Bearbeitung) → gemeinsame Änderungsliste → Validator → Writer → IFC-Kopie + Protokoll`
+
+Die Änderungsliste sammelt alle Eingaben, egal aus welchem Reiter und welcher
+Klasse. Die Tabelle zeigt offene Änderungen bereits an, ein Wechsel der Klasse
+verwirft nichts.
 
 ## 3D-Viewer
 
@@ -88,6 +95,28 @@ kein Häkchen, er benennt das Bauteil nur.
 Die Geometrie wird beim ersten Öffnen des Reiters einmal berechnet und dann
 zwischengespeichert. Bei grossen Modellen (mehrere tausend Bauteile) dauert
 das spürbar, und der Viewer überträgt entsprechend viele Daten an den Browser.
+
+## Reiter «3D-Modell»
+
+Das Modell füllt den Reiter, alle Werkzeuge liegen im Viewer selbst:
+
+- **Navigation:** drehen, verschieben, zoomen; «Ganzes Modell»; feste Ansichten
+  Iso, Oben, Süd, Nord, Ost, West; Geschossfilter; Bauteilklassen ein/aus.
+- **Schnitt:** waagrecht (Grundriss), senkrecht mit Ebene Nord–Süd oder
+  Ost–West. Der Regler verschiebt die Ebene, «⇄ Seite» zeigt die andere Hälfte,
+  «auf Geschoss …» setzt einen Grundriss 1.5 m über die Geschossunterkante und
+  schaut von oben. Die Schnittflächen sind offen (man sieht in die Bauteile).
+- **Pop-up:** Klick auf ein Bauteil zeigt Name, Klasse, Geschoss, GlobalId und
+  alle Property-Sets. Alle Werte sind bearbeitbar. Ja/Nein und Wertelisten aus
+  den Regeln erscheinen als Auswahl. Properties, die laut Regeln fehlen, stehen
+  mit «fehlt» da und lassen sich ergänzen. Mengen (Qto) werden nur angezeigt.
+  «Übernehmen» schickt die Eingaben an Python, das Prüfergebnis erscheint im
+  Pop-up. «◎ Hinzoomen» fährt zum Bauteil und macht den Rest transparent.
+- **Farben:** orange = ausgewählt, grün = offene gültige Änderung, rot = Fehler.
+
+Technisch ist der Viewer eine Streamlit-Komponente (`components.declare_component`).
+Sie lädt three.js als Text und bindet es als Blob ein, damit der Dateityp, mit
+dem Windows `.js`-Dateien ausliefert, keine Rolle spielt.
 
 ## Regeln anpassen
 
