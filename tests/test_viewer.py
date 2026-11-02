@@ -23,8 +23,9 @@ def test_placeholders_replaced():
 
 
 def test_data_roundtrip_and_selection():
-    data = _data(viewer.build_html([MESH], selected=MESH["id"], transparency=0.7))
-    assert data["selected"] == MESH["id"] and data["transparency"] == 0.7
+    data = _data(viewer.build_html([MESH], selected=[MESH["id"]], transparency=0.7))
+    assert data["selected"] == [MESH["id"]] and data["transparency"] == 0.7
+    assert _data(viewer.build_html([MESH]))["selected"] == []
     assert data["meshes"][0]["name"] == "Wand </script> <b>"   # Sonderzeichen kommen unverändert an
 
 

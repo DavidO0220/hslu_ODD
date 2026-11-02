@@ -24,7 +24,7 @@
 <div id="scene"></div>
 <div class="bar">
   <button id="btn-all" title="Kamera auf das ganze Modell">⟲ Ganzes Modell</button>
-  <button id="btn-focus" title="Kamera zurück zum gewählten Bauteil" style="display:none">◎ Zum Bauteil</button>
+  <button id="btn-focus" title="Kamera zurück zur Auswahl" style="display:none">◎ Zur Auswahl</button>
 </div>
 <div class="label" id="label"></div>
 <div class="pick" id="pick"></div>
@@ -76,11 +76,12 @@ function start({ THREE, OrbitControls }, data) {
   fill.position.set(-1.0, 0.6, 0.4);
   scene.add(fill);
 
-  const selectedId = data.selected;
-  const fade = selectedId ? Math.max(0.03, 1 - data.transparency) : 1;   // Deckkraft des übrigen Modells
+  const selectedIds = new Set(data.selected);                            // GlobalIds der angehakten Bauteile
+  const anySelected = selectedIds.size > 0;
+  const fade = anySelected ? Math.max(0.03, 1 - data.transparency) : 1;  // Deckkraft des übrigen Modells
   const all = new THREE.Box3();
   const meshes = [];
-  let selectedMesh = null;
+  const selectedMeshes = [];
 
   for (const m of data.meshes) {
     const geom = new THREE.BufferGeometry();
@@ -90,7 +91,7 @@ function start({ THREE, OrbitControls }, data) {
     geom.computeBoundingBox();
     all.union(geom.boundingBox);
 
-    const isSelected = m.id === selectedId;
+    const isSelected = selectedIds.has(m.id);
     const glass = m.cls === "IfcWindow";
     let material, edgeOpacity;
     if (isSelected) {
@@ -103,7 +104,7 @@ function start({ THREE, OrbitControls }, data) {
       material = new THREE.MeshLambertMaterial({ color: COLORS[m.cls] ?? OTHER, flatShading: true,
                                                  side: THREE.DoubleSide, transparent: opacity < 1,
                                                  opacity, depthWrite: opacity >= 1 });
-      edgeOpacity = selectedId ? Math.max(0.06, fade) : 0.55;
+      edgeOpacity = anySelected ? Math.max(0.06, fade) : 0.55;
     }
     const mesh = new THREE.Mesh(geom, material);
     mesh.userData = m;
@@ -111,7 +112,7 @@ function start({ THREE, OrbitControls }, data) {
       new THREE.EdgesGeometry(geom, 25),
       new THREE.LineBasicMaterial({ color: isSelected ? 0x8a3f00 : EDGE, transparent: true, opacity: edgeOpacity }));
     mesh.add(edges);
-    if (isSelected) { mesh.renderOrder = 10; edges.renderOrder = 11; selectedMesh = mesh; }
+    if (isSelected) { mesh.renderOrder = 10; edges.renderOrder = 11; selectedMeshes.push(mesh); }
     scene.add(mesh);
     meshes.push(mesh);
   }
@@ -136,7 +137,12 @@ function start({ THREE, OrbitControls }, data) {
   controls.maxDistance = size * 5;
 
   const overview = () => viewOf(all, 1.05);
-  const focusView = () => viewOf(new THREE.Box3().setFromObject(selectedMesh), 1.3, 1.6);  // kleine Bauteile mit etwas Umgebung
+  // Alle angehakten Bauteile ins Bild nehmen, kleine Bauteile mit etwas Umgebung
+  const focusView = () => {
+    const box = new THREE.Box3();
+    selectedMeshes.forEach((mesh) => box.expandByObject(mesh));
+    return viewOf(box, 1.3, 1.6);
+  };
 
   let flight = null;
   function flyTo(view, ms = 900) {
@@ -155,10 +161,12 @@ function start({ THREE, OrbitControls }, data) {
   controls.target.copy(first.target);
 
   document.getElementById("btn-all").onclick = () => flyTo(overview());
-  if (selectedMesh) {
-    const m = selectedMesh.userData;
+  if (selectedMeshes.length) {
+    const m = selectedMeshes[0].userData;
     const label = document.getElementById("label");
-    label.textContent = [m.name || "ohne Name", m.storey].filter(Boolean).join(" · ");
+    label.textContent = selectedMeshes.length === 1
+      ? [m.name || "ohne Name", m.storey].filter(Boolean).join(" · ")
+      : `${selectedMeshes.length} Bauteile angewählt`;
     label.style.display = "block";
     const btn = document.getElementById("btn-focus");
     btn.style.display = "inline-block";

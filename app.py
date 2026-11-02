@@ -12,8 +12,11 @@ Zwei Eigenheiten von Streamlit bestimmen den Aufbau:
   Schritten wechselt.
 
 Im Schritt «Bearbeiten» steht neben der Tabelle der 3D-Viewer (viewer/).
-Die bearbeitbare Tabelle meldet keine angeklickte Zeile zurück, deshalb wird
-das Bauteil über ein Auswahlfeld angewählt.
+Die bearbeitbare Tabelle meldet keine angeklickte Zeile zurück. Bauteile
+werden deshalb über die Häkchen-Spalte «3D» in der Tabelle angewählt.
+
+Bauteilklasse und Property-Set lassen sich in «Laden» und «Bearbeiten»
+wählen. Beide Auswahlfelder sind gekoppelt (siehe pick).
 """
 
 from pathlib import Path
@@ -29,6 +32,8 @@ from core.schema import (COL_GLOBAL_ID, COL_MESSAGE, COL_NAME, COL_NEW, COL_OLD,
 from core.validator import load_rules, validate
 
 TEST_MODEL = Path(__file__).resolve().parent / "data" / "testmodell.ifc"
+COL_SHOW = "3D"   # Häkchen-Spalte: Bauteil im Viewer zeigen. Nur Oberfläche, wird nie geschrieben.
+MAX_CARDS = 5     # so viele angewählte Bauteile werden unter dem Viewer mit Werten gezeigt
 
 st.set_page_config(page_title="IFC-Property-Editor", layout="wide")
 
@@ -60,40 +65,65 @@ def _text(value) -> str:
     return "leer" if value is None or (isinstance(value, float) and value != value) else str(value)
 
 
-def show_3d_panel(file_bytes: bytes, current: pd.DataFrame, ifc_class: str) -> str | None:
-    """Viewer mit Auswahlfeld. Gibt die GlobalId des gewählten Bauteils zurück."""
+def show_3d_panel(file_bytes: bytes, current: pd.DataFrame, selected: list[str], ifc_class: str) -> None:
+    """Viewer und darunter die Werte der angewählten Bauteile."""
     try:
         meshes = get_meshes(file_bytes)
     except Exception as exc:
         st.warning(f"Die 3D-Geometrie konnte nicht berechnet werden: {exc}")
-        return None
+        return
     if not meshes:
         st.info("Das Modell enthält keine darstellbare Geometrie.")
-        return None
-
-    selected = None
-    if focus_on_select:
-        labels = {row[COL_GLOBAL_ID]: f"{row[COL_NAME] or 'ohne Name'} · {row[COL_STOREY] or 'ohne Geschoss'}"
-                  for _, row in current.iterrows()}
-        selected = st.selectbox(
-            f"Bauteil anwählen ({ifc_class})",
-            [None, *labels],
-            format_func=lambda gid: "— keines, ganzes Modell zeigen —" if gid is None else labels[gid],
-            key="select::" + "::".join(map(str, st.session_state["context"])),
-        )
+        return
 
     with_geometry = {m["id"] for m in meshes}
-    if selected is not None and selected not in with_geometry:
-        st.caption("Dieses Bauteil hat keine Geometrie und kann im 3D nicht gezeigt werden.")
-    viewer.show(meshes, selected if selected in with_geometry else None, transparency / 100)
+    shown = [gid for gid in selected if gid in with_geometry] if focus_on_select else []
+    if focus_on_select and len(shown) < len(selected):
+        st.caption(f"{len(selected) - len(shown)} angewähltes Bauteil ohne Geometrie kann im 3D nicht gezeigt werden.")
+    viewer.show(meshes, shown, transparency / 100)
 
-    if selected is not None:
-        row = current.loc[current[COL_GLOBAL_ID] == selected].iloc[0]
-        props = [c for c in current.columns if c not in LOCKED_COLUMNS]
+    if not focus_on_select:
+        st.caption("Anwählen ist ausgeschaltet (Seitenleiste). Der Viewer zeigt das ganze Modell.")
+        return
+    if not selected:
+        st.caption(f"Häkchen in der Spalte «{COL_SHOW}» setzen, um Bauteile im Modell zu zeigen.")
+        return
+    props = [c for c in current.columns if c not in LOCKED_COLUMNS]
+    rows = current[current[COL_GLOBAL_ID].isin(selected)]
+    for _, row in rows.head(MAX_CARDS).iterrows():
         with st.container(border=True):
-            st.markdown(f"**{row[COL_NAME] or 'ohne Name'}** · {row[COL_STOREY] or 'ohne Geschoss'} · {ifc_class}")
-            st.markdown("  \n".join(f"{p}: **{_text(row[p])}**" for p in props))
-    return selected
+            st.markdown(f"**{row[COL_NAME] or 'ohne Name'}** · {row[COL_STOREY] or 'ohne Geschoss'} · {ifc_class}  \n"
+                        + " · ".join(f"{p}: **{_text(row[p])}**" for p in props))
+    if len(rows) > MAX_CARDS:
+        st.caption(f"… und {len(rows) - MAX_CARDS} weitere angewählte Bauteile.")
+
+
+def _sync(widget_key: str, state_key: str) -> None:
+    st.session_state[state_key] = st.session_state[widget_key]
+
+
+def pick(label: str, options: list[str], state_key: str, widget_key: str, where=st):
+    """Auswahlfeld, das mit dem gleichen Feld im anderen Reiter gekoppelt ist.
+
+    Der gemeinsame Wert liegt in st.session_state[state_key]. Vor dem Zeichnen
+    bekommt das Feld diesen Wert, bei einer Änderung schreibt es ihn zurück.
+    So zeigen «Laden» und «Bearbeiten» immer dieselbe Klasse und dasselbe Pset.
+    """
+    if st.session_state.get(state_key) not in options:
+        st.session_state[state_key] = options[0]
+    st.session_state[widget_key] = st.session_state[state_key]
+    return where.selectbox(label, options, key=widget_key, on_change=_sync, args=(widget_key, state_key))
+
+
+def pick_class_and_pset(prefix: str):
+    """Die beiden gekoppelten Auswahlfelder. Gibt (Klasse, Pset oder None) zurück."""
+    col1, col2 = st.columns(2)
+    ifc_class = pick("Bauteilklasse", classes, "ifc_class", f"{prefix}_class", col1)
+    psets = ifc_reader.list_psets(model, ifc_class)
+    if not psets:
+        st.warning(f"Die Bauteile der Klasse {ifc_class} haben keine Property-Sets.")
+        return ifc_class, None
+    return ifc_class, pick("Property-Set", psets, "pset", f"{prefix}_pset", col2)
 
 
 def reset_downstream() -> None:
@@ -138,18 +168,13 @@ with tab_load:
         except Exception as exc:  # beschädigte oder ungültige Datei
             st.error(f"Die Datei konnte nicht gelesen werden: {exc}")
 
+    classes = ifc_reader.list_classes(model) if model is not None else []
     if model is not None:
-        classes = ifc_reader.list_classes(model)
         if not classes:
             st.warning("Im Modell wurden keine Bauteile gefunden.")
         else:
-            col1, col2 = st.columns(2)
-            ifc_class = col1.selectbox("Bauteilklasse", classes)
-            psets = ifc_reader.list_psets(model, ifc_class)
-            if not psets:
-                st.warning(f"Die Bauteile der Klasse {ifc_class} haben keine Property-Sets.")
-            else:
-                pset = col2.selectbox("Property-Set", psets)
+            ifc_class, pset = pick_class_and_pset("load")
+            if pset is not None:
                 context = (file_name, len(ifc_bytes), ifc_class, pset)
                 if st.session_state.get("context") != context:
                     st.session_state["context"] = context
@@ -166,8 +191,10 @@ with tab_load:
 
 # =============================== 2 Bearbeiten ================================
 edited = None
-selected_id = None
+selected_ids: list[str] = []
 with tab_edit:
+    if classes:
+        pick_class_and_pset("edit")   # dieselbe Auswahl wie in «Laden»
     if table is None:
         st.info("Zuerst im Schritt «Laden» eine Datei, eine Klasse und ein Property-Set wählen.")
     else:
@@ -175,19 +202,24 @@ with tab_edit:
                  "GlobalId, Name und Geschoss sind gesperrt. Zelle leeren entfernt den Wert.")
         left, right = st.columns([1.15, 1], gap="medium") if show_3d else (st.container(), None)
         with left:
-            # Ja/Nein-Properties als Auswahlfeld, alle anderen als freie Texteingabe
+            # Häkchen-Spalte vorne, Ja/Nein-Properties als Auswahlfeld, alle anderen als freie Texteingabe
             config = {col: st.column_config.SelectboxColumn(col, options=[YES, NO]) for col in bool_columns(raw_table)}
-            edited = st.data_editor(
-                table,
+            config[COL_SHOW] = st.column_config.CheckboxColumn(COL_SHOW, help="Bauteil im 3D-Viewer zeigen", width="small")
+            with_show = table.copy()
+            with_show.insert(0, COL_SHOW, False)
+            edited_full = st.data_editor(
+                with_show,
                 disabled=LOCKED_COLUMNS,
                 hide_index=True,
                 column_config=config,
                 num_rows="fixed",
                 key=f"editor::{'::'.join(map(str, st.session_state['context']))}",
             )
+            selected_ids = list(edited_full.loc[edited_full[COL_SHOW] == True, COL_GLOBAL_ID])  # noqa: E712
+            edited = edited_full.drop(columns=[COL_SHOW])   # die Häkchen sind keine Änderung am Modell
         if right is not None:
             with right:
-                selected_id = show_3d_panel(ifc_bytes, edited, ifc_class)
+                show_3d_panel(ifc_bytes, edited, selected_ids, ifc_class)
 
 # =============================== 3 Prüfen ====================================
 validated = None
@@ -253,8 +285,7 @@ with st.sidebar:
     st.write(f"Datei: {file_name or '—'}")
     if table is not None:
         st.write(f"Klasse: {ifc_class}  \nPset: {pset}")
-    if selected_id is not None and edited is not None:
-        sel = edited.loc[edited[COL_GLOBAL_ID] == selected_id].iloc[0]
-        st.write(f"Angewählt: {sel[COL_NAME] or 'ohne Name'} ({sel[COL_STOREY] or '—'})")
+    if selected_ids:
+        st.write(f"Im 3D angewählt: {len(selected_ids)} Bauteil(e)")
     if validated is not None:
         st.write(f"Änderungen: {len(validated)} · gültig: {int(validated[COL_VALID].sum())}")

@@ -42,12 +42,18 @@ GlobalId, Name und Geschoss lassen sich nicht ändern.
    das ganze Gebäude: drei Geschosse, Fenster in der Südfassade, Treppe im
    Westraum, eine Tür pro Geschoss in der Innenwand.
 2. Mit der Maus drehen, verschieben, zoomen. «⟲ Ganzes Modell» setzt die Kamera zurück.
-3. Bei «Bauteil anwählen (IfcWall)» die Zeile «Innenwand 120 · 1. OG» wählen.
+3. In der Tabelle bei «Innenwand 120 · 1. OG» das Häkchen in der Spalte «3D» setzen.
    Erwartet: Die Kamera fährt zur Wand, sie wird orange, der Rest wird
    transparent. Darunter: FireRating **leer**, IsExternal Nein, LoadBearing Nein.
-4. In der Tabelle `EI60` eintragen: Die Karte unter dem Viewer zeigt sofort EI60.
-5. In der Seitenleiste «Bauteil beim Anwählen zeigen» ausschalten: Das
-   Auswahlfeld verschwindet, das Modell ist wieder ganz sichtbar.
+4. Zusätzlich «Innenwand 120 · 2. OG» anhaken: Beide Wände sind orange, oben
+   rechts steht «2 Bauteile angewählt».
+5. Bei der Innenwand im 1. OG `EI60` eintragen: Die Karte unter dem Viewer zeigt sofort EI60.
+6. Oben im Reiter «Bearbeiten» die Bauteilklasse auf `IfcWindow` stellen:
+   Tabelle und Viewer wechseln auf die Fenster, im Reiter «Laden» steht
+   ebenfalls `IfcWindow`. Danach wieder `IfcWall` wählen. Achtung: Ein
+   Klassenwechsel verwirft nicht gespeicherte Eingaben in der Tabelle.
+7. In der Seitenleiste «Bauteil beim Anwählen zeigen» ausschalten: Das Modell
+   ist wieder ganz sichtbar, die Häkchen werden ignoriert.
 
 ## 3 Prüfen
 
@@ -71,5 +77,5 @@ Zeile, die gültige Änderung. Optional die Kopie in einem BIM-Viewer öffnen.
 - **Ja/Nein ändern:** IsExternal einer Aussenwand auf «Nein» setzen, speichern, Kopie neu laden: Der Wert ist «Nein».
 - **Wert löschen:** Die Zelle mit «EI45» leeren: Das Property wird entfernt.
 - **Fenster:** Klasse `IfcWindow`, Pset `Pset_WindowCommon`: 6 Bauteile, 1 leerer Wert. U-Wert `1,1` ist gültig, `5` liegt über dem Maximum 3.0 und wird abgelehnt.
-- **Treppe:** Klasse `IfcStair` anwählen: Die Kamera zeigt die Treppe durch die Deckenöffnung.
+- **Treppe:** Klasse `IfcStair` wählen und die Treppe anhaken: Die Kamera zeigt sie mit der Deckenöffnung darüber.
 - **Defekte Datei:** Eine beliebige andere Datei mit Endung .ifc hochladen: Es erscheint eine Fehlermeldung, die App läuft weiter.

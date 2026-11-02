@@ -37,21 +37,21 @@ def _embed(value) -> str:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":")).replace("<", "\\u003c")
 
 
-def build_html(meshes: list[dict], selected: str | None = None, transparency: float = 0.85) -> str:
+def build_html(meshes: list[dict], selected: list[str] | None = None, transparency: float = 0.85) -> str:
     """Vollständige HTML-Seite des Viewers.
 
     meshes:       Netze aus core.geometry.load_meshes
-    selected:     GlobalId des hervorgehobenen Bauteils oder None
+    selected:     GlobalIds der hervorgehobenen Bauteile (leer: ganzes Modell normal zeigen)
     transparency: 0 bis 1, wie durchsichtig das übrige Modell bei einer Auswahl wird
     """
     template, three, orbit = _assets()
-    data = {"meshes": meshes, "selected": selected, "transparency": float(transparency)}
+    data = {"meshes": meshes, "selected": list(selected or []), "transparency": float(transparency)}
     parts = {"DATA": _embed(data), "THREE": _embed(three), "ORBIT": _embed(orbit)}
     # Ein Durchgang: eingesetzter Text wird nicht nochmals nach Platzhaltern durchsucht
     return _PLACEHOLDER.sub(lambda m: parts[m.group(1)], template)
 
 
-def show(meshes: list[dict], selected: str | None = None, transparency: float = 0.85, height: int = 560) -> None:
+def show(meshes: list[dict], selected: list[str] | None = None, transparency: float = 0.85, height: int = 560) -> None:
     """Zeigt den Viewer in der Streamlit-Seite."""
     html = build_html(meshes, selected, transparency)
     if hasattr(st, "iframe"):            # neuere Streamlit-Versionen

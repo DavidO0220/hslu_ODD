@@ -70,16 +70,20 @@ Im Reiter «Bearbeiten» steht rechts neben der Tabelle das Modell in 3D.
 
 - Linke Maustaste dreht, rechte Maustaste verschiebt, das Mausrad zoomt.
   Ein Klick ohne Ziehen zeigt Name, Klasse und Geschoss des Bauteils.
-- Über «Bauteil anwählen» wird ein Bauteil der aktuellen Tabelle gewählt.
-  Die Kamera fährt dorthin, das Bauteil wird orange, der Rest transparent.
-  Darunter stehen seine aktuellen Werte, auch noch nicht gespeicherte.
+- Bauteilklasse und Property-Set lassen sich auch im Reiter «Bearbeiten» wählen.
+  Die Felder sind mit denen in «Laden» gekoppelt.
+- Die Tabelle hat vorne die Häkchen-Spalte «3D». Ein Häkchen wählt das Bauteil
+  im Viewer an, mehrere Häkchen sind möglich. Die Kamera fährt zur Auswahl,
+  die Bauteile werden orange, der Rest transparent. Unter dem Viewer stehen
+  ihre aktuellen Werte, auch noch nicht gespeicherte. Die Häkchen sind keine
+  Änderung am Modell und erscheinen nicht im Schritt «Prüfen».
 - In der Seitenleiste: «3D-Ansicht anzeigen» blendet den Viewer aus,
   «Bauteil beim Anwählen zeigen» schaltet Auswahl und Kamerafahrt ab,
   «Transparenz übriges Modell» regelt, wie durchsichtig der Rest wird.
 
-Die Auswahl läuft über ein Auswahlfeld, weil die bearbeitbare Tabelle von
-Streamlit keine angeklickte Zeile zurückmeldet. Ein Klick im 3D-Modell wählt
-die Zeile in der Tabelle nicht aus, er benennt das Bauteil nur.
+Die Auswahl läuft über eine Häkchen-Spalte, weil die bearbeitbare Tabelle von
+Streamlit keine angeklickte Zeile zurückmeldet. Ein Klick im 3D-Modell setzt
+kein Häkchen, er benennt das Bauteil nur.
 
 Die Geometrie wird beim ersten Öffnen des Reiters einmal berechnet und dann
 zwischengespeichert. Bei grossen Modellen (mehrere tausend Bauteile) dauert
