@@ -32,8 +32,12 @@ def load_model(file_bytes: bytes) -> ifcopenshell.file:
 
 
 def list_classes(model: ifcopenshell.file) -> list[str]:
-    """Alle Bauteilklassen im Modell, z. B. ['IfcDoor', 'IfcSlab', 'IfcWall']."""
-    return sorted({element.is_a() for element in model.by_type("IfcElement")})
+    """Alle Bauteilklassen im Modell, z. B. ['IfcDoor', 'IfcSlab', 'IfcWall'].
+
+    Öffnungen (IfcOpeningElement) sind technisch auch IfcElement, aber keine
+    Bauteile, die man bearbeitet. Sie werden deshalb weggelassen.
+    """
+    return sorted({e.is_a() for e in model.by_type("IfcElement") if not e.is_a("IfcFeatureElement")})
 
 
 def _psets_of(element) -> dict:
@@ -53,7 +57,7 @@ def list_psets(model: ifcopenshell.file, ifc_class: str) -> list[str]:
     return sorted(names)
 
 
-def _storey_name(element) -> str:
+def storey_name(element) -> str:
     """Name des Geschosses, in dem das Bauteil liegt, sonst leer."""
     container = element_util.get_container(element)
     return container.Name if container is not None and container.Name else ""
@@ -75,7 +79,7 @@ def to_table(model: ifcopenshell.file, ifc_class: str, pset_name: str) -> pd.Dat
         rows.append({
             COL_GLOBAL_ID: element.GlobalId,
             COL_NAME: element.Name or "",
-            COL_STOREY: _storey_name(element),
+            COL_STOREY: storey_name(element),
             **values,
         })
 

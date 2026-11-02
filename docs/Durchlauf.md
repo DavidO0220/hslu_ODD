@@ -10,9 +10,13 @@ So sieht ein vollständiger Durchlauf aus. Die Zahlen gelten für
 | Geschosse | 3 | EG, 1. OG, 2. OG |
 | Wände (IfcWall) | 15 | Pset_WallCommon; 2 ohne FireRating, 1 mit ungültigem «EI45» |
 | Decken (IfcSlab) | 3 | Pset_SlabCommon |
-| Türen (IfcDoor) | 3 | Pset_DoorCommon; 1 ohne FireRating |
+| Türen (IfcDoor) | 3 | Pset_DoorCommon; 1 ohne FireRating; in der Innenwand |
+| Fenster (IfcWindow) | 6 | Pset_WindowCommon; 1 ohne ThermalTransmittance (U-Wert); in der Südwand |
+| Treppe (IfcStair) | 1 | Pset_StairCommon; vom EG ins 1. OG, durch eine Deckenöffnung |
 
-Grundriss 10 × 8 m, vier Aussenwände (300 mm) und eine Innenwand (120 mm) pro Geschoss.
+Grundriss 10 × 8 m, vier Aussenwände (300 mm) und eine Innenwand (120 mm) pro
+Geschoss. Türen und Fenster sitzen in Öffnungen, die aus den Wänden
+ausgeschnitten sind (IfcOpeningElement, im Programm nicht als Klasse gelistet).
 
 ## 1 Laden
 
@@ -31,6 +35,19 @@ IsExternal und LoadBearing erscheinen als «Ja»/«Nein».
 3. Bei der «Aussenwand Nord 300» im 2. OG `EI45` eintragen.
 
 GlobalId, Name und Geschoss lassen sich nicht ändern.
+
+**3D-Ansicht** (rechts neben der Tabelle):
+
+1. Beim ersten Öffnen erscheint kurz «3D-Geometrie wird berechnet …», dann
+   das ganze Gebäude: drei Geschosse, Fenster in der Südfassade, Treppe im
+   Westraum, eine Tür pro Geschoss in der Innenwand.
+2. Mit der Maus drehen, verschieben, zoomen. «⟲ Ganzes Modell» setzt die Kamera zurück.
+3. Bei «Bauteil anwählen (IfcWall)» die Zeile «Innenwand 120 · 1. OG» wählen.
+   Erwartet: Die Kamera fährt zur Wand, sie wird orange, der Rest wird
+   transparent. Darunter: FireRating **leer**, IsExternal Nein, LoadBearing Nein.
+4. In der Tabelle `EI60` eintragen: Die Karte unter dem Viewer zeigt sofort EI60.
+5. In der Seitenleiste «Bauteil beim Anwählen zeigen» ausschalten: Das
+   Auswahlfeld verschwindet, das Modell ist wieder ganz sichtbar.
 
 ## 3 Prüfen
 
@@ -53,4 +70,6 @@ Zeile, die gültige Änderung. Optional die Kopie in einem BIM-Viewer öffnen.
 
 - **Ja/Nein ändern:** IsExternal einer Aussenwand auf «Nein» setzen, speichern, Kopie neu laden: Der Wert ist «Nein».
 - **Wert löschen:** Die Zelle mit «EI45» leeren: Das Property wird entfernt.
+- **Fenster:** Klasse `IfcWindow`, Pset `Pset_WindowCommon`: 6 Bauteile, 1 leerer Wert. U-Wert `1,1` ist gültig, `5` liegt über dem Maximum 3.0 und wird abgelehnt.
+- **Treppe:** Klasse `IfcStair` anwählen: Die Kamera zeigt die Treppe durch die Deckenöffnung.
 - **Defekte Datei:** Eine beliebige andere Datei mit Endung .ifc hochladen: Es erscheint eine Fehlermeldung, die App läuft weiter.

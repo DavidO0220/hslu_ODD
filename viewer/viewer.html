@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #eef2f3;
+               font-family: "Source Sans Pro", "Segoe UI", system-ui, sans-serif; color: #31333f; }
+  #scene { position: absolute; inset: 0; }
+  .bar { position: absolute; top: 10px; left: 10px; display: flex; gap: 6px; }
+  button { font: inherit; font-size: 13px; border: 1px solid #c9ccd3; background: #fff; color: #31333f;
+           border-radius: 6px; padding: 5px 10px; cursor: pointer; }
+  button:hover { border-color: #0f6e56; color: #0f6e56; }
+  .label { position: absolute; top: 10px; right: 10px; max-width: 48%; background: #e07b1f; color: #fff;
+           border-radius: 6px; padding: 5px 10px; font-size: 13px; display: none; }
+  .pick { position: absolute; top: 48px; left: 10px; max-width: 70%; background: rgba(255,255,255,.95);
+          border: 1px solid #d0d3da; border-radius: 6px; padding: 6px 10px; font-size: 12.5px; display: none; }
+  .hint { position: absolute; left: 10px; bottom: 10px; right: 10px; width: fit-content; background: rgba(255,255,255,.88);
+          border-radius: 6px; padding: 5px 9px; font-size: 12px; color: #555; }
+  .msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+         color: #666; font-size: 14px; text-align: center; padding: 24px; }
+</style>
+</head>
+<body>
+<div id="scene"></div>
+<div class="bar">
+  <button id="btn-all" title="Kamera auf das ganze Modell">⟲ Ganzes Modell</button>
+  <button id="btn-focus" title="Kamera zurück zum gewählten Bauteil" style="display:none">◎ Zum Bauteil</button>
+</div>
+<div class="label" id="label"></div>
+<div class="pick" id="pick"></div>
+<div class="hint">Linke Maustaste: drehen · Rechte Maustaste: verschieben · Mausrad: zoomen · Klick: Bauteil benennen</div>
+<div class="msg" id="msg">3D-Ansicht wird geladen …</div>
+
+<!-- Daten und Bibliotheken setzt viewer/__init__.py ein. -->
+<script id="data" type="application/json">__DATA__</script>
+<script>
+  window.__THREE_SRC__ = __THREE__;
+  window.__ORBIT_SRC__ = __ORBIT__;
+</script>
+
+<script type="module">
+const msg = document.getElementById("msg");
+
+// three.js liegt im Projekt (viewer/vendor) und wird hier ohne Internet geladen:
+// Der Quelltext wird als Blob-URL eingebunden, OrbitControls bekommt diese URL statt "three".
+async function loadThree() {
+  const blobUrl = (src) => URL.createObjectURL(new Blob([src], { type: "text/javascript" }));
+  const threeUrl = blobUrl(window.__THREE_SRC__);
+  const orbitUrl = blobUrl(window.__ORBIT_SRC__.replace(/from\s*['"]three['"]/g, `from "${threeUrl}"`));
+  const THREE = await import(threeUrl);
+  const { OrbitControls } = await import(orbitUrl);
+  return { THREE, OrbitControls };
+}
+
+const COLORS = { IfcWall: 0xd9d6cc, IfcSlab: 0xa9b4b8, IfcDoor: 0x9c6b3c, IfcWindow: 0x7fb8d6,
+                 IfcStair: 0xbdb6a8, IfcColumn: 0xc4c0b4, IfcBeam: 0xc4c0b4, IfcRoof: 0xb08f7a };
+const OTHER = 0xc8c8c8, ACCENT = 0xe07b1f, EDGE = 0x5f5e5a;
+const VIEW_DIR = [0.55, -1.0, 0.75];   // Blick von Süden, leicht von oben
+
+function start({ THREE, OrbitControls }, data) {
+  const holder = document.getElementById("scene");
+  const renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.setSize(holder.clientWidth, holder.clientHeight);
+  holder.appendChild(renderer.domElement);
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0xeef2f3);
+  const camera = new THREE.PerspectiveCamera(40, holder.clientWidth / holder.clientHeight, 0.05, 5000);
+  camera.up.set(0, 0, 1);                      // IFC: z zeigt nach oben
+  scene.add(new THREE.HemisphereLight(0xffffff, 0xc9ccd0, 2.6));
+  const sun = new THREE.DirectionalLight(0xffffff, 1.6);
+  sun.position.set(0.4, -1.0, 1.3);
+  scene.add(sun);
+  const fill = new THREE.DirectionalLight(0xffffff, 0.6);
+  fill.position.set(-1.0, 0.6, 0.4);
+  scene.add(fill);
+
+  const selectedId = data.selected;
+  const fade = selectedId ? Math.max(0.03, 1 - data.transparency) : 1;   // Deckkraft des übrigen Modells
+  const all = new THREE.Box3();
+  const meshes = [];
+  let selectedMesh = null;
+
+  for (const m of data.meshes) {
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute("position", new THREE.Float32BufferAttribute(m.v, 3));
+    geom.setIndex(m.f);
+    geom.computeVertexNormals();
+    geom.computeBoundingBox();
+    all.union(geom.boundingBox);
+
+    const isSelected = m.id === selectedId;
+    const glass = m.cls === "IfcWindow";
+    let material, edgeOpacity;
+    if (isSelected) {
+      material = new THREE.MeshLambertMaterial({ color: ACCENT, emissive: 0x5a2600, flatShading: true,
+                                                 side: THREE.DoubleSide, polygonOffset: true,
+                                                 polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+      edgeOpacity = 1;
+    } else {
+      const opacity = (glass ? 0.55 : 1) * fade;
+      material = new THREE.MeshLambertMaterial({ color: COLORS[m.cls] ?? OTHER, flatShading: true,
+                                                 side: THREE.DoubleSide, transparent: opacity < 1,
+                                                 opacity, depthWrite: opacity >= 1 });
+      edgeOpacity = selectedId ? Math.max(0.06, fade) : 0.55;
+    }
+    const mesh = new THREE.Mesh(geom, material);
+    mesh.userData = m;
+    const edges = new THREE.LineSegments(
+      new THREE.EdgesGeometry(geom, 25),
+      new THREE.LineBasicMaterial({ color: isSelected ? 0x8a3f00 : EDGE, transparent: true, opacity: edgeOpacity }));
+    mesh.add(edges);
+    if (isSelected) { mesh.renderOrder = 10; edges.renderOrder = 11; selectedMesh = mesh; }
+    scene.add(mesh);
+    meshes.push(mesh);
+  }
+
+  // --- Kamera -------------------------------------------------------------
+  const controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.12;
+  controls.screenSpacePanning = true;
+
+  const dir = new THREE.Vector3(...VIEW_DIR).normalize();
+  function viewOf(box, margin, minRadius = 0.5) {
+    const center = box.getCenter(new THREE.Vector3());
+    const radius = Math.max(box.getSize(new THREE.Vector3()).length() / 2, minRadius);
+    const vfov = THREE.MathUtils.degToRad(camera.fov);
+    const hfov = 2 * Math.atan(Math.tan(vfov / 2) * camera.aspect);
+    const dist = (radius * margin) / Math.sin(Math.min(vfov, hfov) / 2);
+    return { target: center, position: center.clone().addScaledVector(dir, dist) };
+  }
+  const size = all.getSize(new THREE.Vector3()).length() || 10;
+  camera.near = size / 2000; camera.far = size * 20; camera.updateProjectionMatrix();
+  controls.maxDistance = size * 5;
+
+  const overview = () => viewOf(all, 1.05);
+  const focusView = () => viewOf(new THREE.Box3().setFromObject(selectedMesh), 1.3, 1.6);  // kleine Bauteile mit etwas Umgebung
+
+  let flight = null;
+  function flyTo(view, ms = 900) {
+    const p0 = camera.position.clone(), t0 = controls.target.clone(), t = performance.now();
+    flight = (now) => {
+      const k = Math.min(1, (now - t) / ms);
+      const e = k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;   // sanft an- und abbremsen
+      camera.position.lerpVectors(p0, view.position, e);
+      controls.target.lerpVectors(t0, view.target, e);
+      if (k >= 1) flight = null;
+    };
+  }
+
+  const first = overview();
+  camera.position.copy(first.position);
+  controls.target.copy(first.target);
+
+  document.getElementById("btn-all").onclick = () => flyTo(overview());
+  if (selectedMesh) {
+    const m = selectedMesh.userData;
+    const label = document.getElementById("label");
+    label.textContent = [m.name || "ohne Name", m.storey].filter(Boolean).join(" · ");
+    label.style.display = "block";
+    const btn = document.getElementById("btn-focus");
+    btn.style.display = "inline-block";
+    btn.onclick = () => flyTo(focusView());
+    setTimeout(() => flyTo(focusView(), 1100), 250);   // vom ganzen Modell zum Bauteil fahren
+  }
+
+  // --- Klick ohne Ziehen: Bauteil benennen (nur Anzeige) --------------------
+  const ray = new THREE.Raycaster(), pointer = new THREE.Vector2(), pick = document.getElementById("pick");
+  let down = null;
+  renderer.domElement.addEventListener("pointerdown", (ev) => { down = [ev.clientX, ev.clientY]; });
+  renderer.domElement.addEventListener("pointerup", (ev) => {
+    if (!down || Math.hypot(ev.clientX - down[0], ev.clientY - down[1]) > 4) return;
+    const r = renderer.domElement.getBoundingClientRect();
+    pointer.set(((ev.clientX - r.left) / r.width) * 2 - 1, -((ev.clientY - r.top) / r.height) * 2 + 1);
+    ray.setFromCamera(pointer, camera);
+    const hit = ray.intersectObjects(meshes, false)[0];
+    if (!hit) { pick.style.display = "none"; return; }
+    const m = hit.object.userData;
+    pick.textContent = [m.name || "ohne Name", m.cls, m.storey].filter(Boolean).join(" · ");
+    pick.style.display = "block";
+  });
+
+  // --- Grösse und Zeichnen -------------------------------------------------
+  window.addEventListener("resize", () => {
+    camera.aspect = holder.clientWidth / holder.clientHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(holder.clientWidth, holder.clientHeight);
+  });
+  renderer.setAnimationLoop((now) => {
+    if (flight) flight(now);
+    controls.update();
+    renderer.render(scene, camera);
+  });
+}
+
+try {
+  const data = JSON.parse(document.getElementById("data").textContent);
+  if (!data.meshes.length) throw new Error("keine Geometrie im Modell");
+  start(await loadThree(), data);
+  msg.style.display = "none";
+} catch (err) {
+  console.error(err);
+  msg.textContent = "Die 3D-Ansicht konnte nicht angezeigt werden: " + (err && err.message ? err.message : err);
+}
+</script>
+</body>
+</html>

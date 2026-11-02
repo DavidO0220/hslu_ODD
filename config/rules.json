@@ -18,5 +18,19 @@
       "LoadBearing": {"type": "bool"},
       "IsExternal": {"type": "bool"}
     }
+  },
+  "IfcWindow": {
+    "Pset_WindowCommon": {
+      "ThermalTransmittance": {"type": "float", "min": 0.3, "max": 3.0},
+      "IsExternal": {"type": "bool"}
+    }
+  },
+  "IfcStair": {
+    "Pset_StairCommon": {
+      "FireRating": {"type": "enum", "values": ["R30", "R60", "R90"]},
+      "RiserHeight": {"type": "float", "min": 0.10, "max": 0.20},
+      "TreadLength": {"type": "float", "min": 0.22, "max": 0.35},
+      "IsExternal": {"type": "bool"}
+    }
   }
 }

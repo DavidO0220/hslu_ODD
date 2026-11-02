@@ -85,3 +85,20 @@ def test_missing_pset_is_created(model_path, tmp_path):
     changes = validate(diff.find_changes(table, edited, "Pset_Projekt"), "IfcWall", load_rules())
     after = ifc_reader.to_table(ifc_reader.load_model(ifc_writer.apply_changes(data, changes)), "IfcWall", "Pset_Projekt")
     assert dict(zip(after["GlobalId"], after["Code"]))[other] == "C"
+
+
+def test_window_u_value_float(model_path):
+    """Zahl-Regel: fehlender U-Wert wird als Zahl geschrieben, ein Wert ausserhalb der Grenzen nicht."""
+    original_bytes = model_path.read_bytes()
+    table = to_display(ifc_reader.to_table(ifc_reader.load_model(original_bytes), "IfcWindow", "Pset_WindowCommon"))
+    edited = table.copy()
+    empty = edited.index[edited["ThermalTransmittance"].isna()][0]
+    other = edited.index[edited["ThermalTransmittance"].notna()][0]
+    edited.loc[empty, "ThermalTransmittance"] = "1,1"     # Komma wie in der Schweiz üblich
+    edited.loc[other, "ThermalTransmittance"] = "5"       # über dem Maximum 3.0
+    changes = validate(diff.find_changes(table, edited, "Pset_WindowCommon"), "IfcWindow", load_rules())
+    assert sorted(changes["Gueltig"]) == [False, True]
+    after = ifc_reader.to_table(ifc_reader.load_model(ifc_writer.apply_changes(original_bytes, changes)), "IfcWindow", "Pset_WindowCommon")
+    u = dict(zip(after["GlobalId"], after["ThermalTransmittance"]))
+    assert abs(u[table.loc[empty, "GlobalId"]] - 1.1) < 1e-9
+    assert abs(u[table.loc[other, "GlobalId"]] - 0.9) < 1e-9

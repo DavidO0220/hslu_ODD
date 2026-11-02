@@ -43,6 +43,9 @@ siehe [docs/Durchlauf.md](docs/Durchlauf.md).
 
 ```
 app.py               Oberfläche (Streamlit), vier Reiter: Laden, Bearbeiten, Prüfen, Speichern
+viewer/              3D-Viewer (three.js), wird im Reiter «Bearbeiten» neben der Tabelle gezeigt
+  viewer.html        Seite des Viewers: Szene, Kamera, Hervorhebung
+  vendor/            three.js r169 (MIT-Lizenz), lokal, damit kein Internet nötig ist
 core/                Kern-Logik, kennt Streamlit nicht
   schema.py          feste Spaltennamen: Vertrag zwischen den Modulen
   ifc_reader.py      IFC laden, Klassen und Psets auflisten, Tabelle bauen
@@ -51,6 +54,7 @@ core/                Kern-Logik, kennt Streamlit nicht
   validator.py       Änderungen gegen config/rules.json prüfen
   ifc_writer.py      gültige Änderungen in eine IFC-Kopie schreiben
   changelog.py       Protokoll der Änderungen als CSV
+  geometry.py        Dreiecksnetze der Bauteile für den 3D-Viewer (IfcOpenShell)
 config/rules.json    erlaubte Werte pro Klasse, Pset und Property
 tools/               Testmodell erzeugen
 tests/               automatische Tests (pytest)
@@ -59,6 +63,27 @@ data/                Testmodell
 ```
 
 Datenfluss: `Original-IFC → Reader → Tabelle → (Bearbeitung) → Diff → Änderungsliste → Validator → Writer → IFC-Kopie + Protokoll`
+
+## 3D-Viewer
+
+Im Reiter «Bearbeiten» steht rechts neben der Tabelle das Modell in 3D.
+
+- Linke Maustaste dreht, rechte Maustaste verschiebt, das Mausrad zoomt.
+  Ein Klick ohne Ziehen zeigt Name, Klasse und Geschoss des Bauteils.
+- Über «Bauteil anwählen» wird ein Bauteil der aktuellen Tabelle gewählt.
+  Die Kamera fährt dorthin, das Bauteil wird orange, der Rest transparent.
+  Darunter stehen seine aktuellen Werte, auch noch nicht gespeicherte.
+- In der Seitenleiste: «3D-Ansicht anzeigen» blendet den Viewer aus,
+  «Bauteil beim Anwählen zeigen» schaltet Auswahl und Kamerafahrt ab,
+  «Transparenz übriges Modell» regelt, wie durchsichtig der Rest wird.
+
+Die Auswahl läuft über ein Auswahlfeld, weil die bearbeitbare Tabelle von
+Streamlit keine angeklickte Zeile zurückmeldet. Ein Klick im 3D-Modell wählt
+die Zeile in der Tabelle nicht aus, er benennt das Bauteil nur.
+
+Die Geometrie wird beim ersten Öffnen des Reiters einmal berechnet und dann
+zwischengespeichert. Bei grossen Modellen (mehrere tausend Bauteile) dauert
+das spürbar, und der Viewer überträgt entsprechend viele Daten an den Browser.
 
 ## Regeln anpassen
 
@@ -88,3 +113,4 @@ Properties ohne Regel werden ohne Prüfung übernommen.
 - Nur einfache Properties (IfcPropertySingleValue), keine Mengen (Qto), keine Aufzählungs-Properties.
 - Werte, die nur am Bauteiltyp hängen, werden nicht angezeigt.
 - Betrieb lokal im Browser, kein Mehrbenutzerbetrieb.
+- Der 3D-Viewer zeigt Bauteile (IfcElement), keine Räume (IfcSpace) und keine Öffnungen.
