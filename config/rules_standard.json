@@ -1,0 +1,36 @@
+{
+  "IfcWall": {
+    "Pset_WallCommon": {
+      "FireRating": {"type": "enum", "values": ["EI30", "EI60", "EI90"]},
+      "IsExternal": {"type": "bool"},
+      "LoadBearing": {"type": "bool"}
+    }
+  },
+  "IfcDoor": {
+    "Pset_DoorCommon": {
+      "FireRating": {"type": "enum", "values": ["EI30", "EI60"]},
+      "IsExternal": {"type": "bool"}
+    }
+  },
+  "IfcSlab": {
+    "Pset_SlabCommon": {
+      "FireRating": {"type": "enum", "values": ["REI30", "REI60", "REI90"]},
+      "LoadBearing": {"type": "bool"},
+      "IsExternal": {"type": "bool"}
+    }
+  },
+  "IfcWindow": {
+    "Pset_WindowCommon": {
+      "ThermalTransmittance": {"type": "float", "min": 0.3, "max": 3.0},
+      "IsExternal": {"type": "bool"}
+    }
+  },
+  "IfcStair": {
+    "Pset_StairCommon": {
+      "FireRating": {"type": "enum", "values": ["R30", "R60", "R90"]},
+      "RiserHeight": {"type": "float", "min": 0.10, "max": 0.20},
+      "TreadLength": {"type": "float", "min": 0.22, "max": 0.35},
+      "IsExternal": {"type": "bool"}
+    }
+  }
+}

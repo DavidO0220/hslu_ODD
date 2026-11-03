@@ -2,7 +2,7 @@
 
 from core import ifc_reader, ifc_writer, pending
 from core.display import to_display
-from core.validator import load_rules
+from core.validator import load_rules, STANDARD_RULES_PATH
 
 
 def _walls(model):
@@ -55,7 +55,7 @@ def test_validate_all_and_write_across_classes(model_path):
     pending.put(store, wall, "Wand", "IfcWall", "Pset_WallCommon", "FireRating", None, "EI60")
     pending.put(store, window, "Fenster", "IfcWindow", "Pset_WindowCommon", "ThermalTransmittance", 0.9, "7")  # zu hoch
     pending.put(store, window, "Fenster", "IfcWindow", "Pset_WindowCommon", "IsExternal", "Ja", "Nein")
-    checked = pending.validate_all(store, load_rules())
+    checked = pending.validate_all(store, load_rules(STANDARD_RULES_PATH))
     assert sorted(checked["Gueltig"]) == [False, True, True]
     after = ifc_reader.element_properties(ifc_reader.load_model(ifc_writer.apply_changes(data, checked)))
     assert after[wall]["psets"]["Pset_WallCommon"]["FireRating"] == "EI60"
@@ -99,7 +99,7 @@ def test_new_pset_written_with_types(model_path):
     n, errors = pending.create_pset(store, walls, "CH_Brandschutz",
                                     [("Nachweis", "Text", "VKF 2015"), ("Dicke", "Zahl", "0,3"), ("Geprueft", "Ja/Nein", "Ja")], {})
     assert errors == [] and n == 6
-    checked = pending.validate_all(store, load_rules())
+    checked = pending.validate_all(store, load_rules(STANDARD_RULES_PATH))
     assert checked["Gueltig"].all()
     after = ifc_reader.load_model(ifc_writer.apply_changes(data, checked))
     import ifcopenshell.util.element as eu

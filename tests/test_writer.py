@@ -2,7 +2,7 @@
 
 from core import diff, ifc_reader, ifc_writer
 from core.display import to_display
-from core.validator import load_rules, validate
+from core.validator import load_rules, validate, STANDARD_RULES_PATH
 
 
 def _roundtrip(model_path, edit):
@@ -11,7 +11,7 @@ def _roundtrip(model_path, edit):
     table = to_display(ifc_reader.to_table(model, "IfcWall", "Pset_WallCommon"))
     edited = table.copy()
     edit(edited)
-    changes = validate(diff.find_changes(table, edited, "Pset_WallCommon"), "IfcWall", load_rules())
+    changes = validate(diff.find_changes(table, edited, "Pset_WallCommon"), "IfcWall", load_rules(STANDARD_RULES_PATH))
     new_bytes = ifc_writer.apply_changes(original_bytes, changes)
     new_model = ifc_reader.load_model(new_bytes)
     return changes, ifc_reader.to_table(new_model, "IfcWall", "Pset_WallCommon"), original_bytes
@@ -69,7 +69,7 @@ def test_shared_pset_is_unshared(model_path, tmp_path):
     table = to_display(ifc_reader.to_table(ifc_reader.load_model(data), "IfcWall", "Pset_Projekt"))
     edited = table.copy()
     edited.loc[edited["GlobalId"] == g1, "Code"] = "B"
-    changes = validate(diff.find_changes(table, edited, "Pset_Projekt"), "IfcWall", load_rules())
+    changes = validate(diff.find_changes(table, edited, "Pset_Projekt"), "IfcWall", load_rules(STANDARD_RULES_PATH))
     after = ifc_reader.to_table(ifc_reader.load_model(ifc_writer.apply_changes(data, changes)), "IfcWall", "Pset_Projekt")
     code = dict(zip(after["GlobalId"], after["Code"]))
     assert code[g1] == "B"
@@ -82,7 +82,7 @@ def test_missing_pset_is_created(model_path, tmp_path):
     other = table.loc[~table["GlobalId"].isin([g1, g2]), "GlobalId"].iloc[0]
     edited = table.copy()
     edited.loc[edited["GlobalId"] == other, "Code"] = "C"
-    changes = validate(diff.find_changes(table, edited, "Pset_Projekt"), "IfcWall", load_rules())
+    changes = validate(diff.find_changes(table, edited, "Pset_Projekt"), "IfcWall", load_rules(STANDARD_RULES_PATH))
     after = ifc_reader.to_table(ifc_reader.load_model(ifc_writer.apply_changes(data, changes)), "IfcWall", "Pset_Projekt")
     assert dict(zip(after["GlobalId"], after["Code"]))[other] == "C"
 
@@ -96,7 +96,7 @@ def test_window_u_value_float(model_path):
     other = edited.index[edited["ThermalTransmittance"].notna()][0]
     edited.loc[empty, "ThermalTransmittance"] = "1,1"     # Komma wie in der Schweiz üblich
     edited.loc[other, "ThermalTransmittance"] = "5"       # über dem Maximum 3.0
-    changes = validate(diff.find_changes(table, edited, "Pset_WindowCommon"), "IfcWindow", load_rules())
+    changes = validate(diff.find_changes(table, edited, "Pset_WindowCommon"), "IfcWindow", load_rules(STANDARD_RULES_PATH))
     assert sorted(changes["Gueltig"]) == [False, True]
     after = ifc_reader.to_table(ifc_reader.load_model(ifc_writer.apply_changes(original_bytes, changes)), "IfcWindow", "Pset_WindowCommon")
     u = dict(zip(after["GlobalId"], after["ThermalTransmittance"]))

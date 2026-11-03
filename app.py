@@ -24,17 +24,18 @@ Bauteilklasse und Property-Set lassen sich in «Laden» und «Bearbeiten»
 wählen. Beide Auswahlfelder sind gekoppelt (siehe pick).
 """
 
+import json
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 
 import viewer
-from core import changelog, geometry, ids_import, ifc_reader, ifc_writer, model_check, pending
+from core import changelog, geometry, ids_import, ifc_reader, ifc_writer, model_check, pending, rules_store
 from core.display import NO, YES, add_columns, bool_columns, to_display
 from core.schema import (COL_CLASS, COL_GLOBAL_ID, COL_MESSAGE, COL_NAME, COL_NEW, COL_OLD, COL_PROPERTY,
                          COL_PSET, COL_STOREY, COL_VALID, LOCKED_COLUMNS)
-from core.validator import load_rules, merge_rules, rules_for_class
+from core.validator import STANDARD_RULES_PATH, load_rules, merge_rules, rules_for_class
 
 TEST_MODEL = Path(__file__).resolve().parent / "data" / "testmodell.ifc"
 EXAMPLE_IDS = Path(__file__).resolve().parent / "config" / "beispiel_anforderungen.ids"
@@ -315,7 +316,7 @@ with st.sidebar:
                     for note in ids_notes:
                         st.write("· " + note)
     else:
-        st.caption("Regeln aus config/rules.json")
+        st.caption("Regeln aus config/rules.json, ansehen und ändern im Reiter «Regeln»")
     st.divider()
 
 # Einstellungen für den 3D-Viewer, gelten für die ganze Sitzung
@@ -333,8 +334,8 @@ with st.sidebar:
 
 st.title("IFC-Property-Editor")
 st.caption("Properties von IFC-Modellen im Browser ergänzen, prüfen und zurückschreiben")
-tab_load, tab_edit, tab_3d, tab_check, tab_save = st.tabs(
-    ["1  Laden", "2  Bearbeiten", "3  3D-Modell", "4  Prüfen", "5  Speichern"])
+tab_load, tab_edit, tab_3d, tab_check, tab_save, tab_rules = st.tabs(
+    ["1  Laden", "2  Bearbeiten", "3  3D-Modell", "4  Prüfen", "5  Speichern", "⚙  Regeln"])
 
 # =============================== 1 Laden =====================================
 with tab_load:
@@ -565,6 +566,72 @@ with tab_save:
                                file_name=f"{stem}_bearbeitet.ifc", mime="application/octet-stream", type="primary")
             c2.download_button("Protokoll (CSV)", st.session_state["result_log"],
                                file_name=f"{stem}_protokoll.csv", mime="text/csv")
+
+# =============================== Regeln ======================================
+with tab_rules:
+    st.write("**Prüfregeln** aus `config/rules.json`, eine Zeile pro Property. Werte direkt in der Tabelle ändern, "
+             "unten eine Zeile hinzufügen, Zeilen links markieren und mit dem Papierkorb löschen. Erst «Regeln speichern» übernimmt.")
+    rules_rev = st.session_state.setdefault("rules_rev", 0)
+    current_rules = base_rules()
+    standard_rules = load_rules(STANDARD_RULES_PATH)
+    if message := st.session_state.pop("rules_message", None):
+        st.success(message)
+    diffs = rules_store.differences(current_rules, standard_rules)
+    if diffs:
+        with st.expander(f"{len(diffs)} Abweichung(en) von der Standardvorlage"):
+            for d in diffs:
+                st.write("· " + d)
+    else:
+        st.caption("Die Regeln entsprechen der Standardvorlage `config/rules_standard.json`.")
+    if ids_info:
+        st.info("Eine IDS-Datei ist aktiv. Ihre Regeln haben bei gleicher Property Vorrang und erscheinen hier nicht.")
+
+    labels = list(rules_store.TYPE_LABELS.values())
+    edited_rules = st.data_editor(
+        rules_store.rules_to_table(current_rules), num_rows="dynamic", hide_index=True, key=f"rules_editor::{rules_rev}",
+        column_config={
+            rules_store.COL_CLASS: st.column_config.TextColumn("Klasse", help="IFC-Klasse, z. B. IfcWall"),
+            rules_store.COL_PSET: st.column_config.TextColumn("Pset", help="Property-Set, z. B. Pset_WallCommon"),
+            rules_store.COL_PROP: st.column_config.TextColumn("Property", help="Name der Property, z. B. FireRating"),
+            rules_store.COL_TYPE: st.column_config.SelectboxColumn("Typ", options=labels, required=True),
+            rules_store.COL_VALUES: st.column_config.TextColumn(
+                "Werteliste", help="Bei Werteliste: erlaubte Werte mit Komma trennen. Bei Ja/Nein optional ein fester Wert."),
+            rules_store.COL_MIN: st.column_config.NumberColumn("Min", help="Bei Zahl: kleinster erlaubter Wert"),
+            rules_store.COL_MAX: st.column_config.NumberColumn("Max", help="Bei Zahl: grösster erlaubter Wert"),
+            rules_store.COL_PATTERN: st.column_config.TextColumn("Muster", help="Bei Muster: regulärer Ausdruck, z. B. VKF.*"),
+            rules_store.COL_REQUIRED: st.column_config.CheckboxColumn("Pflicht", help="Leer ist ein Fehler"),
+            rules_store.COL_NOTE: st.column_config.TextColumn("Hinweis", help="Erscheint als Hilfe im Pop-up"),
+        },
+    )
+    new_rules, rule_errors = rules_store.table_to_rules(edited_rules)
+    unsaved = not rule_errors and new_rules != current_rules
+    if unsaved:
+        st.caption("Es gibt ungespeicherte Änderungen.")
+
+    c1, c2, c3 = st.columns([1, 1.4, 1])
+    if c1.button("Regeln speichern", type="primary", disabled=not unsaved and not rule_errors):
+        if rule_errors:
+            for message in rule_errors:
+                st.error(message)
+        else:
+            rules_store.save_rules(new_rules)
+            base_rules.clear()
+            st.session_state["rules_rev"] = rules_rev + 1
+            st.session_state["rules_message"] = "Regeln gespeichert. Sie gelten ab sofort für Bearbeiten, Prüfen und das 3D-Modell."
+            st.rerun()
+    confirm = c2.checkbox("Eigene Regeln verwerfen", disabled=not diffs and not unsaved,
+                          help="Sicherung gegen versehentliches Zurücksetzen")
+    if c2.button("Auf Standard zurücksetzen", disabled=not confirm):
+        rules_store.reset_rules()
+        base_rules.clear()
+        st.session_state["rules_rev"] = rules_rev + 1
+        st.session_state["rules_message"] = "Regeln auf die Standardvorlage zurückgesetzt."
+        st.rerun()
+    c3.download_button("rules.json herunterladen",
+                       (json.dumps(current_rules, ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
+                       file_name="rules.json", mime="application/json")
+    with st.expander("Standardvorlage ansehen (config/rules_standard.json)"):
+        st.dataframe(rules_store.rules_to_table(standard_rules), hide_index=True)
 
 # =============================== Seitenleiste ================================
 with st.sidebar:

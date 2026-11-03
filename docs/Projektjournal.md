@@ -66,6 +66,7 @@ Daten der Commits aus `git log`. Schritte ohne Commit sind nach Phase eingeordne
 | 5.7 | IDS-Import (eigener Parser), neue Regeltypen pattern/text/prohibited und Pflichtwerte, Beispiel-IDS, Modellprüfung «Modell gegen Regeln», Test mit offiziellen IDS-Beispielen | 58 Tests, 28 App-Abläufe in der Prüfumgebung |
 | 5.8 | Projektjournal (dieses Dokument) rückwirkend angelegt | Regel zur Pflege in `CLAUDE.md` |
 | 5.9 | Reihenfolge der Teile getauscht: Teil A Arbeitsjournal, Teil B Quellen | Wunsch von David; Quellennummern heissen jetzt B1–B5 |
+| 5.10 | Reiter «⚙ Regeln»: Regeln als Tabelle ansehen und von Hand bearbeiten (Typ, Werteliste, Min/Max, Muster, Pflicht, Hinweis), Eingaben werden vor dem Speichern geprüft, Abweichungen zur Vorlage sichtbar, «Auf Standard zurücksetzen» mit Sicherheitshäkchen | Entscheid: Standardvorlage `config/rules_standard.json` getrennt von den aktiven Regeln `config/rules.json`, damit Zurücksetzen immer möglich ist; Tests prüfen gegen die Vorlage. 62 Tests, 31 App-Abläufe |
 
 ---
 
@@ -100,7 +101,7 @@ Daten der Commits aus `git log`. Schritte ohne Commit sind nach Phase eingeordne
 | B3.2 | IfcOpenShell `api/pset/edit_pset.py` | Erkenntnis: Bei neuen Properties ohne Vorlage bestimmt der Python-Typ den IFC-Typ (Text → IfcLabel, Zahl → IfcReal, Wahrheitswert → IfcBoolean) | Typ-Spalte im Formular «Neues Pset anlegen», `pending.typed` |
 | B3.3 | IfcOpenShell `Ifc4-schema.cpp` (IFC4-Schema) | Prüfung des Testmodells auf gültige Attribute in dieser Umgebung | nur Prüfumgebung, nicht im Programm |
 | B3.4 | [PyPI: ifcopenshell 0.8.3.post2](https://pypi.org/project/ifcopenshell/0.8.3.post2/) | Prüfung, ob es ein Windows-Paket für Python 3.13 gibt (ja, Python 3.9–3.13) | Einrichtungsanleitung |
-| B3.5 | Streamlit, [Quellcode auf GitHub](https://github.com/streamlit/streamlit), Version 1.66.1 | `st.data_editor` hat keine Zeilenauswahl (→ Häkchen-Spalte «3D»); `components.v1.html` veraltet (→ `st.iframe`, später Komponente); Sandbox-Regeln für iframes; Nachrichtenprotokoll für Komponenten (componentReady, render, setComponentValue, setFrameHeight); Komponenten-Dateien mit `mimetypes` ausgeliefert (→ three.js per fetch/Blob laden); Regeln für Session State bei Auswahlfeldern (→ gekoppelte Auswahl Klasse/Pset) | `app.py`, `viewer/__init__.py`, `viewer/component/index.html` |
+| B3.5 | Streamlit, [Quellcode auf GitHub](https://github.com/streamlit/streamlit), Version 1.66.1 | `st.data_editor` hat keine Zeilenauswahl (→ Häkchen-Spalte «3D»); `components.v1.html` veraltet (→ `st.iframe`, später Komponente); Sandbox-Regeln für iframes; Nachrichtenprotokoll für Komponenten (componentReady, render, setComponentValue, setFrameHeight); Komponenten-Dateien mit `mimetypes` ausgeliefert (→ three.js per fetch/Blob laden); Regeln für Session State bei Auswahlfeldern (→ gekoppelte Auswahl Klasse/Pset); Spaltentypen im Tabelleneditor (Auswahl, Zahl, Häkchen) für den Regel-Editor | `app.py`, `viewer/__init__.py`, `viewer/component/index.html` |
 | B3.6 | three.js r169, [GitHub](https://github.com/mrdoob/three.js), MIT-Lizenz | 3D-Darstellung, Kamera-Steuerung (OrbitControls), Schnittebenen (clipping planes), Klick-Auswahl (Raycaster) | `viewer/component/` (Dateien in `vendor/`) |
 | B3.7 | Pandas, pytest | Tabellen, Vergleich alt/neu, Protokoll; automatische Tests | ganzes Projekt |
 

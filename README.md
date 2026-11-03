@@ -56,10 +56,12 @@ core/                Kern-Logik, kennt Streamlit nicht
   pending.py         gemeinsame Liste offener Änderungen aus Tabelle und 3D-Modell
   ids_import.py      Prüfregeln aus einer IDS-Datei (buildingSMART) lesen
   model_check.py     alle Bauteile gegen die Regeln prüfen («Modell gegen Regeln»)
+  rules_store.py     Regeln als Tabelle, Eingaben prüfen, speichern, zurücksetzen
   ifc_writer.py      gültige Änderungen in eine IFC-Kopie schreiben
   changelog.py       Protokoll der Änderungen als CSV
   geometry.py        Dreiecksnetze der Bauteile für den 3D-Viewer (IfcOpenShell)
-config/rules.json    erlaubte Werte pro Klasse, Pset und Property
+config/rules.json    aktive Regeln: erlaubte Werte pro Klasse, Pset und Property (im Reiter «Regeln» bearbeitbar)
+config/rules_standard.json   Standardvorlage der Regeln, wird nie verändert
 config/beispiel_anforderungen.ids   Beispiel-IDS zum Testmodell
 docs/Projektjournal.md   Quellen und Arbeitsjournal des Projekts
 tools/               Testmodell erzeugen
@@ -167,6 +169,15 @@ Regeln noch nicht erfüllen (fehlende Pflichtwerte, ungültige Werte), mit dem
 aktuellen Stand inklusive offener Änderungen.
 
 ## Regeln anpassen
+
+Im Reiter **«⚙ Regeln»** stehen die aktiven Regeln als Tabelle, eine Zeile pro
+Property. Werte ändern, Zeilen ergänzen oder löschen, dann «Regeln speichern».
+Gespeichert wird in `config/rules.json`. Die Standardvorlage
+`config/rules_standard.json` verändert die App nie. «Auf Standard
+zurücksetzen» (mit Sicherheitshäkchen) kopiert die Vorlage zurück. Der Reiter
+zeigt auch, worin die eigenen Regeln von der Vorlage abweichen.
+
+Die Tests prüfen immer gegen die Standardvorlage, eigene Regeln stören sie nicht.
 
 `config/rules.json` legt pro Bauteilklasse, Property-Set und Property fest,
 welche Werte erlaubt sind:

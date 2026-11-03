@@ -25,14 +25,18 @@ from core.diff import normalize
 from core.display import NO, YES
 from core.schema import COL_MESSAGE, COL_NEW, COL_PROPERTY, COL_PSET, COL_VALID, VALIDATED_COLUMNS
 
-RULES_PATH = Path(__file__).resolve().parent.parent / "config" / "rules.json"
+CONFIG = Path(__file__).resolve().parent.parent / "config"
+RULES_PATH = CONFIG / "rules.json"                     # aktive Regeln, im Reiter «Regeln» bearbeitbar
+STANDARD_RULES_PATH = CONFIG / "rules_standard.json"   # Standardvorlage, wird nie verändert
 
 _TRUE = {"ja", "true", "wahr", "1", "yes"}
 _FALSE = {"nein", "false", "falsch", "0", "no"}
 
 
 def load_rules(path: Path = RULES_PATH) -> dict:
-    """Liest die Regeln aus der JSON-Datei."""
+    """Liest die Regeln aus der JSON-Datei. Fehlt rules.json, gilt die Standardvorlage."""
+    if path == RULES_PATH and not path.exists():
+        path = STANDARD_RULES_PATH
     with open(path, encoding="utf-8") as fh:
         return json.load(fh)
 

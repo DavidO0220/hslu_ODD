@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from core import ids_import, ifc_reader, model_check, pending
-from core.validator import check_value, load_rules, merge_rules, rules_for_class
+from core.validator import check_value, load_rules, merge_rules, rules_for_class, STANDARD_RULES_PATH
 
 EXAMPLE = Path(__file__).resolve().parent.parent / "config" / "beispiel_anforderungen.ids"
 OFFICIAL_EXAMPLES = Path(__file__).resolve().parent / "ids_beispiele"
@@ -50,7 +50,7 @@ def test_rule_types():
 
 
 def test_merge_keeps_rules_json_and_ids_wins(example):
-    merged = merge_rules(load_rules(), example[0])
+    merged = merge_rules(load_rules(STANDARD_RULES_PATH), example[0])
     wall = rules_for_class(merged, "IfcWall")["Pset_WallCommon"]
     assert wall["FireRating"]["required"] is True                    # aus der IDS
     assert rules_for_class(merged, "IfcSlab")["Pset_SlabCommon"]     # aus rules.json, nicht in der IDS

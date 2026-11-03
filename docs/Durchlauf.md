@@ -118,6 +118,18 @@ Kontrolle: Die Kopie im Schritt «Laden» hochladen. Erwartet sind jetzt
 **1 leerer Wert** und zwei Wände mit EI60. Das Protokoll enthält genau eine
 Zeile, die gültige Änderung. Optional die Kopie in einem BIM-Viewer öffnen.
 
+## Regeln (Reiter «⚙ Regeln»)
+
+1. Die Tabelle zeigt 14 Regeln, darunter steht «entspricht der Standardvorlage».
+2. Bei IfcWall · Pset_WallCommon · FireRating die Werteliste auf
+   `EI30, EI60, EI90, EI120` ändern, «Regeln speichern».
+   Erwartet: «Regeln gespeichert», «1 Abweichung von der Standardvorlage».
+   Im Reiter «Bearbeiten» bietet FireRating jetzt EI120 an.
+3. Gegenprobe: Bei einer Zeile Typ «Muster» mit Muster `([` wählen und speichern:
+   Fehlermeldung «Muster ist ungültig», nichts wird gespeichert.
+4. «Eigene Regeln verwerfen» anhaken, «Auf Standard zurücksetzen»: Die
+   Werteliste ist wieder EI30, EI60, EI90.
+
 ## Weitere Prüfungen
 
 - **Ja/Nein ändern:** IsExternal einer Aussenwand auf «Nein» setzen, speichern, Kopie neu laden: Der Wert ist «Nein».
