@@ -481,9 +481,10 @@ function createApp({ THREE, OrbitControls }) {
 
   // --- Pop-up mit Eigenschaften --------------------------------------------------------
   function rulesFor(cls) {
-    if (S.rules[cls]) return S.rules[cls];
-    const base = cls.replace(/(StandardCase|ElementedCase)$/, "");
-    return S.rules[base] || {};
+    // ohne Gross-/Kleinschreibung (IDS schreibt IFCWALL), IFC2x3-Varianten wie IfcWallStandardCase -> IfcWall
+    const byUpper = Object.fromEntries(Object.entries(S.rules).map(([k, v]) => [k.toUpperCase(), v]));
+    const name = cls.toUpperCase();
+    return byUpper[name] || byUpper[name.replace(/(STANDARDCASE|ELEMENTEDCASE)$/, "")] || {};
   }
   function closePanel() { $("panel").style.display = "none"; }
 
@@ -505,7 +506,8 @@ function createApp({ THREE, OrbitControls }) {
       const have = p.psets[pset] || {}, rule = rules[pset] || {};
       const pend = [...S.pending.values()].filter((c) => c.guid === id && c.pset === pset).map((c) => c.prop);
       const set = el("div", { class: "set" }, el("h4", {}, pset));
-      for (const prop of [...new Set([...Object.keys(have), ...Object.keys(rule), ...pend])].sort())
+      const allowed = Object.keys(rule).filter((k) => rule[k].type !== "prohibited" || k in have);   // verbotene nur zeigen, wenn vorhanden
+      for (const prop of [...new Set([...Object.keys(have), ...allowed, ...pend])].sort())
         set.append(propRow(id, pset, prop, prop in have ? have[prop] : null, rule[prop], prop in have));
       return set;
     };
@@ -548,7 +550,8 @@ function createApp({ THREE, OrbitControls }) {
       input = el("select", {}, el("option", { value: "" }, "— leer —"),
         ...options.map((o) => el("option", { value: o }, o + (isBool || rule.values.includes(o) ? "" : "  (ungültig)"))));
     } else {
-      input = el("input", { type: "text", placeholder: rule && rule.type === "float" ? "Zahl" : "leer" });
+      const hint = !rule ? "leer" : rule.type === "float" ? "Zahl" : rule.type === "pattern" ? `Muster ${rule.pattern}` : "leer";
+      input = el("input", { type: "text", placeholder: hint, title: rule && rule.instructions ? rule.instructions : "" });
     }
     input.value = fmt(current);
     const row = el("div", { class: "prop" });
@@ -566,7 +569,9 @@ function createApp({ THREE, OrbitControls }) {
           row.classList.toggle("dirty", S.dirty.has(key)); updateFooter();
         } }, "↺")
       : el("span");
-    const label = el("span", { class: "name", title: prop }, prop, exists ? null : el("small", {}, "  fehlt"));
+    const must = rule && rule.required ? el("small", { style: "color:#c8453b" }, " *") : null;   // Pflicht laut Regel
+    const label = el("span", { class: "name", title: rule && rule.instructions ? `${prop}: ${rule.instructions}` : prop },
+                     prop, must, exists ? null : el("small", {}, "  fehlt"));
     row.append(label, input, reset);
     if (S.dirty.has(key)) row.classList.add("dirty");
     else if (pend) {

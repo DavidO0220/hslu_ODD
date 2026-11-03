@@ -54,10 +54,14 @@ core/                Kern-Logik, kennt Streamlit nicht
   diff.py            Änderungen zwischen Original und Bearbeitung finden
   validator.py       Änderungen gegen config/rules.json prüfen
   pending.py         gemeinsame Liste offener Änderungen aus Tabelle und 3D-Modell
+  ids_import.py      Prüfregeln aus einer IDS-Datei (buildingSMART) lesen
+  model_check.py     alle Bauteile gegen die Regeln prüfen («Modell gegen Regeln»)
   ifc_writer.py      gültige Änderungen in eine IFC-Kopie schreiben
   changelog.py       Protokoll der Änderungen als CSV
   geometry.py        Dreiecksnetze der Bauteile für den 3D-Viewer (IfcOpenShell)
 config/rules.json    erlaubte Werte pro Klasse, Pset und Property
+config/beispiel_anforderungen.ids   Beispiel-IDS zum Testmodell
+docs/Projektjournal.md   Quellen und Arbeitsjournal des Projekts
 tools/               Testmodell erzeugen
 tests/               automatische Tests (pytest)
 data/                Testmodell
@@ -141,6 +145,27 @@ Technisch ist der Viewer eine Streamlit-Komponente (`components.declare_componen
 Sie lädt three.js als Text und bindet es als Blob ein, damit der Dateityp, mit
 dem Windows `.js`-Dateien ausliefert, keine Rolle spielt.
 
+## Prüfregeln aus einer IDS-Datei
+
+In der Seitenleiste unter «Prüfregeln» lässt sich eine IDS-Datei hochladen
+(Information Delivery Specification, Standard von buildingSMART). Zum
+Ausprobieren liegt `config/beispiel_anforderungen.ids` bei.
+
+- Die IDS ergänzt `config/rules.json` und hat bei gleicher Property Vorrang.
+  Mit «Nur Regeln aus der IDS» gilt nur die IDS.
+- Übernommen werden Anforderungen an Properties: Werteliste, fester Wert,
+  Muster, Zahlenbereich, Datentyp, Pflicht/optional/verboten. Die Klasse kommt
+  aus der Anwendbarkeit (Facet «entity»).
+- Was nicht passt (Attribute, Klassifikation, Material, partOf, Muster in
+  Pset-Namen …), steht unter «Nicht übernommen». Die App prüft es nicht.
+- Pflichtwerte gelten auch beim Bearbeiten: Einen Pflichtwert leeren ist ein Fehler.
+- Grenze: Zahlen in einer IDS sind in SI-Einheiten (Länge in m). Die App
+  rechnet Modelle in mm nicht um.
+
+Im Reiter «Prüfen» zeigt **«Modell gegen Regeln»** alle Bauteile, die die
+Regeln noch nicht erfüllen (fehlende Pflichtwerte, ungültige Werte), mit dem
+aktuellen Stand inklusive offener Änderungen.
+
 ## Regeln anpassen
 
 `config/rules.json` legt pro Bauteilklasse, Property-Set und Property fest,
@@ -151,6 +176,11 @@ welche Werte erlaubt sind:
 | `enum` | Wert muss in der Liste stehen | `{"type": "enum", "values": ["EI30", "EI60", "EI90"]}` |
 | `bool` | Ja oder Nein | `{"type": "bool"}` |
 | `float` | Zahl, optional mit Grenzen | `{"type": "float", "min": 0.05, "max": 3.0}` |
+| `pattern` | Text nach Muster (Regex) | `{"type": "pattern", "pattern": "VKF.*"}` |
+| `text` | beliebiger Text | `{"type": "text"}` |
+| `prohibited` | Property darf nicht vorkommen | `{"type": "prohibited"}` |
+
+Jede Regel kann zusätzlich `"required": true` (Pflichtwert) haben.
 
 Properties ohne Regel werden ohne Prüfung übernommen.
 

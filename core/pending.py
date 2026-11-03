@@ -28,7 +28,7 @@ STORE_COLUMNS = CHANGE_COLUMNS + [COL_CLASS]
 # den IFC-Typ: Text -> IfcLabel, Zahl -> IfcReal, Ja/Nein -> IfcBoolean.
 KIND_TEXT, KIND_NUMBER, KIND_BOOL = "Text", "Zahl", "Ja/Nein"
 KINDS = [KIND_TEXT, KIND_NUMBER, KIND_BOOL]
-RULE_KIND = {"enum": KIND_TEXT, "float": KIND_NUMBER, "bool": KIND_BOOL}
+RULE_KIND = {"enum": KIND_TEXT, "float": KIND_NUMBER, "bool": KIND_BOOL, "pattern": KIND_TEXT, "text": KIND_TEXT}
 
 
 def put(store: dict, guid: str, name: str, ifc_class: str, pset: str, prop: str, old, new) -> None:

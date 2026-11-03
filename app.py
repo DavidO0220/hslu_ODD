@@ -30,13 +30,14 @@ import pandas as pd
 import streamlit as st
 
 import viewer
-from core import changelog, geometry, ifc_reader, ifc_writer, pending
+from core import changelog, geometry, ids_import, ifc_reader, ifc_writer, model_check, pending
 from core.display import NO, YES, add_columns, bool_columns, to_display
 from core.schema import (COL_CLASS, COL_GLOBAL_ID, COL_MESSAGE, COL_NAME, COL_NEW, COL_OLD, COL_PROPERTY,
                          COL_PSET, COL_STOREY, COL_VALID, LOCKED_COLUMNS)
-from core.validator import load_rules, rules_for_class
+from core.validator import load_rules, merge_rules, rules_for_class
 
 TEST_MODEL = Path(__file__).resolve().parent / "data" / "testmodell.ifc"
+EXAMPLE_IDS = Path(__file__).resolve().parent / "config" / "beispiel_anforderungen.ids"
 COL_SHOW = "3D"   # Häkchen-Spalte: Bauteil im Viewer zeigen. Nur Oberfläche, wird nie geschrieben.
 MAX_CARDS = 5     # so viele angewählte Bauteile werden unter dem Viewer mit Werten gezeigt
 ALL_STOREYS = "alle Geschosse"
@@ -58,8 +59,20 @@ def get_table(file_bytes: bytes, ifc_class: str, pset: str):
 
 
 @st.cache_data
-def get_rules() -> dict:
+def base_rules() -> dict:
+    """Regeln aus config/rules.json."""
     return load_rules()
+
+
+@st.cache_data
+def read_ids(data: bytes):
+    """IDS-Datei lesen: (Regeln, Hinweise, Info). Wirft IdsError bei ungültiger Datei."""
+    return ids_import.parse_ids(data)
+
+
+def get_rules() -> dict:
+    """Aktive Regeln: rules.json, ergänzt oder ersetzt durch eine IDS (Seitenleiste «Prüfregeln»)."""
+    return RULES
 
 
 @st.cache_resource(show_spinner="3D-Geometrie wird berechnet …")
@@ -196,6 +209,8 @@ def column_config_for(table: pd.DataFrame, raw: pd.DataFrame, pset_rules: dict) 
         elif rule.get("type") == "float":
             low, high = rule.get("min"), rule.get("max")
             config[col] = st.column_config.TextColumn(col, help=f"Zahl zwischen {low} und {high}")
+        elif rule.get("type") == "pattern":
+            config[col] = st.column_config.TextColumn(col, help=f"Text nach Muster {rule.get('pattern')}")
     return config
 
 
@@ -223,8 +238,8 @@ def new_pset_form(file_bytes: bytes, ifc_class: str, store: dict) -> None:
     name = c1.text_input("Name des neuen Property-Sets", value=template if from_rules else "",
                          key=f"new_name::{ifc_class}::{template}", placeholder="z. B. CH_Brandschutz")
     name = name.strip()
-    if name.startswith("Pset_") and name not in class_rules:
-        st.warning("Das Präfix «Pset_» ist für die Standard-Sets von buildingSMART reserviert. "
+    if name.startswith(("Pset_", "Qto_")) and name not in class_rules:
+        st.warning("Die Präfixe «Pset_» und «Qto_» sind für die Standard-Sets von buildingSMART reserviert. "
                    "Für eigene Sets ein eigenes Präfix verwenden, zum Beispiel «CH_» oder ein Firmenkürzel.")
 
     pset_rules = class_rules.get(name, {})
@@ -275,6 +290,33 @@ def reset_downstream() -> None:
     for key in ("result_ifc", "result_log"):
         st.session_state.pop(key, None)
 
+
+# Prüfregeln: rules.json, optional mit IDS-Datei (buildingSMART)
+with st.sidebar:
+    st.subheader("Prüfregeln")
+    ids_upload = st.file_uploader("IDS-Datei (optional)", type=["ids", "xml"],
+                                  help="Anforderungen nach dem Standard IDS von buildingSMART")
+    use_example_ids = EXAMPLE_IDS.exists() and st.checkbox("Beispiel-IDS aus config/ verwenden")
+    ids_bytes = ids_upload.getvalue() if ids_upload is not None else (EXAMPLE_IDS.read_bytes() if use_example_ids else None)
+    RULES, ids_info = base_rules(), None
+    if ids_bytes is not None:
+        try:
+            ids_rules, ids_notes, ids_info = read_ids(ids_bytes)
+        except ids_import.IdsError as exc:
+            st.error(str(exc))
+        else:
+            only_ids = st.checkbox("Nur Regeln aus der IDS", help="Sonst ergänzt die IDS config/rules.json und hat Vorrang.")
+            RULES = ids_rules if only_ids else merge_rules(base_rules(), ids_rules)
+            st.caption(f"IDS «{ids_info['title'] or 'ohne Titel'}»: {ids_info['rules']} Regeln aus "
+                       f"{ids_info['specifications']} Spezifikationen"
+                       + (f", für {' '.join(ids_info['ifc_versions'])}" if ids_info["ifc_versions"] else ""))
+            if ids_notes:
+                with st.expander(f"Nicht übernommen ({len(ids_notes)})"):
+                    for note in ids_notes:
+                        st.write("· " + note)
+    else:
+        st.caption("Regeln aus config/rules.json")
+    st.divider()
 
 # Einstellungen für den 3D-Viewer, gelten für die ganze Sitzung
 with st.sidebar:
@@ -455,6 +497,7 @@ with tab_3d:
 # =============================== 4 Prüfen ====================================
 validated = None
 with tab_check:
+    st.subheader("Änderungen")
     if not store:
         st.info("Noch keine Änderungen. Werte im Schritt «Bearbeiten» oder im «3D-Modell» ändern.")
     else:
@@ -481,6 +524,22 @@ with tab_check:
                 st.error(f"{text}  ·  {row[COL_MESSAGE]}{where}")
         if n_ok < len(validated):
             st.caption("Fehlerhafte Änderungen werden nicht gespeichert. In «Bearbeiten» oder im «3D-Modell» korrigieren.")
+
+    if model is not None:
+        st.subheader("Modell gegen Regeln")
+        source = f"config/rules.json und IDS «{ids_info['title']}»" if ids_info else "config/rules.json"
+        st.caption(f"Alle Bauteile mit dem aktuellen Stand (Modell plus offene Änderungen), Regeln: {source}.")
+        issues = model_check.check_model(get_properties(ifc_bytes), get_rules(), store)
+        if issues.empty:
+            st.success("Alle Bauteile erfüllen die Regeln.")
+        else:
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Regelverstösse", len(issues))
+            c2.metric("betroffene Bauteile", issues[COL_GLOBAL_ID].nunique())
+            c3.metric("davon Pflichtwert fehlt", int(issues[model_check.COL_PROBLEM].str.startswith("Pflichtwert").sum()))
+            st.dataframe(issues.drop(columns=[COL_GLOBAL_ID]), hide_index=True)
+            st.caption("Korrigieren in «Bearbeiten» (Tabelle) oder im «3D-Modell» (Pop-up). "
+                       "Fehlt ein ganzes Property-Set: «Bearbeiten», Modus «Neues Pset anlegen».")
 
 # =============================== 5 Speichern =================================
 with tab_save:

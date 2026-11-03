@@ -96,6 +96,18 @@ Mit den Eingaben aus dem 3D-Modell kommen sie dazu, jede Zeile zeigt Klasse und 
 - grün: Innenwand 120 · FireRating: leer → EI60
 - rot: Aussenwand Nord 300 · FireRating: leer → EI45 · nicht in der Werteliste (EI30, EI60, EI90)
 
+**Modell gegen Regeln** (unten im Reiter «Prüfen»):
+
+- Ohne IDS: **1 Regelverstoss**, die Wand mit EI45.
+- Seitenleiste «Prüfregeln» → «Beispiel-IDS aus config/ verwenden».
+  Erwartet: «11 Regeln aus 5 Spezifikationen», unter «Nicht übernommen» die
+  Anforderung an den Türnamen. Im Reiter «Prüfen»: **5 Regelverstösse, davon
+  4 Pflichtwert fehlt** (2 Wände und 1 Tür ohne FireRating, 1 Fenster ohne U-Wert)
+  plus EI45.
+- Im Pop-up des 3D-Modells tragen Pflichtfelder ein rotes «*».
+- Bei einer Wand im Bearbeiten FireRating leeren: In «Prüfen» steht
+  «Pflichtwert, darf nicht leer sein (Regel: Wände: Brandschutz und Tragwerk)».
+
 ## 5 Speichern
 
 1. Reiter «5 Speichern», Name für das Protokoll eingeben.
