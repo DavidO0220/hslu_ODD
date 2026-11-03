@@ -67,6 +67,7 @@ Daten der Commits aus `git log`. Schritte ohne Commit sind nach Phase eingeordne
 | 5.8 | Projektjournal (dieses Dokument) rückwirkend angelegt | Regel zur Pflege in `CLAUDE.md` |
 | 5.9 | Reihenfolge der Teile getauscht: Teil A Arbeitsjournal, Teil B Quellen | Wunsch von David; Quellennummern heissen jetzt B1–B5 |
 | 5.10 | Reiter «⚙ Regeln»: Regeln als Tabelle ansehen und von Hand bearbeiten (Typ, Werteliste, Min/Max, Muster, Pflicht, Hinweis), Eingaben werden vor dem Speichern geprüft, Abweichungen zur Vorlage sichtbar, «Auf Standard zurücksetzen» mit Sicherheitshäkchen | Entscheid: Standardvorlage `config/rules_standard.json` getrennt von den aktiven Regeln `config/rules.json`, damit Zurücksetzen immer möglich ist; Tests prüfen gegen die Vorlage. 62 Tests, 31 App-Abläufe |
+| 5.11 | Stand gegen ZP1 erneut abgeglichen; Dokument «Coaching-Themen und Ausblick» erstellt (7 Punkte fürs Coaching, 13 Zukunftsthemen) | Offen vor allem: Ablauf in der echten App, zweites Modell, Zusammenführen in main, KI-Einsatz mit dem Dozenten klären |
 
 ---
 
