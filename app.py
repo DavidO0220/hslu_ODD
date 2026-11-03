@@ -80,6 +80,7 @@ def change_store(file_key) -> dict:
         st.session_state["store_file"] = file_key
         st.session_state["pending"] = {}
         st.session_state["editor_rev"] = 0
+        st.session_state["sel3d"] = []      # Auswahl im kleinen Viewer
     return st.session_state["pending"]
 
 
@@ -101,8 +102,8 @@ def _text(value) -> str:
     return "leer" if value is None or (isinstance(value, float) and value != value) else str(value)
 
 
-def show_3d_panel(file_bytes: bytes, current: pd.DataFrame, selected: list[str], ifc_class: str) -> None:
-    """Viewer und darunter die Werte der angewählten Bauteile."""
+def show_3d_panel(file_bytes: bytes, current: pd.DataFrame, ifc_class: str) -> None:
+    """Kleiner Viewer neben der Tabelle. Klick im 3D wählt aus, wie ein Häkchen in der Spalte «3D»."""
     try:
         meshes = get_meshes(file_bytes)
     except Exception as exc:
@@ -112,17 +113,18 @@ def show_3d_panel(file_bytes: bytes, current: pd.DataFrame, selected: list[str],
         st.info("Das Modell enthält keine darstellbare Geometrie.")
         return
 
-    with_geometry = {m["id"] for m in meshes}
-    shown = [gid for gid in selected if gid in with_geometry] if focus_on_select else []
-    if focus_on_select and len(shown) < len(selected):
-        st.caption(f"{len(selected) - len(shown)} angewähltes Bauteil ohne Geometrie kann im 3D nicht gezeigt werden.")
-    viewer.show(meshes, shown, transparency / 100)
+    selected = st.session_state.get("sel3d", [])
+    value = viewer.select3d(meshes, selected, model_id=f"{file_name}:{len(file_bytes)}",
+                            focus=focus_on_select, transparency=transparency / 100)
+    if value and value.get("nonce") != st.session_state.get("select_nonce"):
+        st.session_state["select_nonce"] = value.get("nonce")
+        st.session_state["sel3d"] = list(value.get("ids", []))
+        follow_click(value.get("clicked"), set(current[COL_GLOBAL_ID]), file_bytes)
+        restart_editor()            # Häkchen in der Tabelle neu setzen
+        st.rerun()
 
-    if not focus_on_select:
-        st.caption("Anwählen ist ausgeschaltet (Seitenleiste). Der Viewer zeigt das ganze Modell.")
-        return
     if not selected:
-        st.caption(f"Häkchen in der Spalte «{COL_SHOW}» setzen, um Bauteile im Modell zu zeigen.")
+        st.caption(f"Bauteil im 3D anklicken (Ctrl+Klick für mehrere) oder Häkchen in der Spalte «{COL_SHOW}» setzen.")
         return
     props = [c for c in current.columns if c not in LOCKED_COLUMNS]
     rows = current[current[COL_GLOBAL_ID].isin(selected)]
@@ -131,7 +133,22 @@ def show_3d_panel(file_bytes: bytes, current: pd.DataFrame, selected: list[str],
             st.markdown(f"**{row[COL_NAME] or 'ohne Name'}** · {row[COL_STOREY] or 'ohne Geschoss'} · {ifc_class}  \n"
                         + " · ".join(f"{p}: **{_text(row[p])}**" for p in props))
     if len(rows) > MAX_CARDS:
-        st.caption(f"… und {len(rows) - MAX_CARDS} weitere angewählte Bauteile.")
+        st.caption(f"… und {len(rows) - MAX_CARDS} weitere ausgewählte Bauteile.")
+    if len(selected) > len(rows):
+        st.caption(f"{len(selected) - len(rows)} ausgewählte(s) Bauteil(e) aus anderen Klassen, Psets oder Geschossen.")
+
+
+def follow_click(clicked: str | None, in_table: set, file_bytes: bytes) -> None:
+    """Angeklicktes Bauteil steht nicht in der Tabelle: auf seine Klasse, sein Pset und alle Geschosse wechseln."""
+    if not clicked or clicked in in_table:
+        return
+    info = get_properties(file_bytes).get(clicked)
+    if info is None:
+        return
+    st.session_state["ifc_class"] = info["cls"]
+    if st.session_state.get("pset") not in info["psets"] and info["psets"]:
+        st.session_state["pset"] = sorted(info["psets"])[0]
+    st.session_state["reset::edit_storey"] = True   # Geschossfilter erst beim nächsten Durchlauf zurücksetzen
 
 
 def _sync(widget_key: str, state_key: str) -> None:
@@ -185,7 +202,7 @@ def column_config_for(table: pd.DataFrame, raw: pd.DataFrame, pset_rules: dict) 
 def pick_storey(storeys: list[str], key: str, where=st) -> str:
     """Geschossfilter. Gibt ALL_STOREYS oder ein Geschoss zurück."""
     options = [ALL_STOREYS, *storeys]
-    if st.session_state.get(key) not in options:
+    if st.session_state.pop(f"reset::{key}", False) or st.session_state.get(key) not in options:
         st.session_state[key] = ALL_STOREYS
     return where.selectbox("Geschoss", options, key=key)
 
@@ -264,8 +281,9 @@ with st.sidebar:
     st.subheader("3D-Ansicht")
     show_3d = st.toggle("3D-Ansicht anzeigen", value=True)
     focus_on_select = st.toggle(
-        "Bauteil beim Anwählen zeigen", value=True, disabled=not show_3d,
-        help="Die Kamera fährt zum gewählten Bauteil, der Rest des Modells wird transparent.",
+        "Beim Anwählen hinzoomen", value=True, disabled=not show_3d,
+        help="Die Kamera fährt zur Auswahl, der Rest des Modells wird transparent. "
+             "Ausgeschaltet bleibt die Auswahl orange markiert, die Kamera bleibt stehen.",
     )
     transparency = st.slider("Transparenz übriges Modell (%)", 0, 95, 85, step=5,
                              disabled=not (show_3d and focus_on_select))
@@ -363,8 +381,9 @@ with tab_edit:
                 shown = pending.apply(view, store, pset)      # Tabelle mit den offenen Änderungen
                 config = column_config_for(shown, raw_table, pset_rules)
                 config[COL_SHOW] = st.column_config.CheckboxColumn(COL_SHOW, help="Bauteil im 3D-Viewer zeigen", width="small")
+                selection = st.session_state.setdefault("sel3d", [])
                 with_show = shown.copy()
-                with_show.insert(0, COL_SHOW, False)
+                with_show.insert(0, COL_SHOW, with_show[COL_GLOBAL_ID].isin(selection).astype(bool))
                 edited_full = st.data_editor(
                     with_show,
                     disabled=LOCKED_COLUMNS,
@@ -373,7 +392,13 @@ with tab_edit:
                     num_rows="fixed",
                     key=f"editor::{'::'.join(map(str, st.session_state['context']))}::{storey}::{st.session_state['editor_rev']}",
                 )
-                selected_ids = list(edited_full.loc[edited_full[COL_SHOW] == True, COL_GLOBAL_ID])  # noqa: E712
+                checked = list(edited_full.loc[edited_full[COL_SHOW] == True, COL_GLOBAL_ID])  # noqa: E712
+                visible = set(edited_full[COL_GLOBAL_ID])
+                # Auswahl aus der Tabelle übernehmen, Auswahl ausserhalb der Tabelle bleibt
+                new_selection = [g for g in selection if g not in visible or g in checked]
+                new_selection += [g for g in checked if g not in new_selection]
+                st.session_state["sel3d"] = new_selection
+                selected_ids = new_selection
                 edited = edited_full.drop(columns=[COL_SHOW])   # die Häkchen sind keine Änderung am Modell
                 pending.merge_edits(store, view, shown, edited, ifc_class, pset)
                 others = sum(1 for (_, ps, _), e in store.items() if e[COL_CLASS] != ifc_class or ps != pset)
@@ -381,7 +406,7 @@ with tab_edit:
                     st.caption(f"Dazu {others} offene Änderung(en) in anderen Klassen oder Property-Sets, siehe «Prüfen».")
             if right is not None:
                 with right:
-                    show_3d_panel(ifc_bytes, edited, selected_ids, ifc_class)
+                    show_3d_panel(ifc_bytes, edited, ifc_class)
 
 # =============================== 3 3D-Modell =================================
 with tab_3d:

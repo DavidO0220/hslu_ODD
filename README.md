@@ -44,9 +44,8 @@ siehe [docs/Durchlauf.md](docs/Durchlauf.md).
 ```
 app.py               Oberfläche (Streamlit), fünf Reiter: Laden, Bearbeiten, 3D-Modell, Prüfen, Speichern
 viewer/              3D-Viewer (three.js)
-  viewer.html        kleiner Viewer neben der Tabelle in «Bearbeiten» (nur Anzeige)
-  component/         grosser Viewer im Reiter «3D-Modell»: Streamlit-Komponente mit Rückkanal
-    index.html       Navigation, Schnitt, Pop-up mit Eigenschaften
+  component/         Streamlit-Komponente mit Rückkanal, für beide Viewer
+    index.html       Modus «select» neben der Tabelle, Modus «edit» im Reiter «3D-Modell»
     vendor/          three.js r169 (MIT-Lizenz), lokal, damit kein Internet nötig ist
 core/                Kern-Logik, kennt Streamlit nicht
   schema.py          feste Spaltennamen: Vertrag zwischen den Modulen
@@ -96,30 +95,27 @@ Oben wählst du, was du tun willst:
 - Eigene Sets nicht mit «Pset_» beginnen lassen, das Präfix ist für
   buildingSMART reserviert. Die App warnt dann.
 
-## 3D-Viewer
+## 3D-Viewer neben der Tabelle
 
-Im Reiter «Bearbeiten» steht rechts neben der Tabelle das Modell in 3D.
+Im Modus «Bestehendes Pset bearbeiten» steht rechts neben der Tabelle das Modell in 3D.
 
-- Linke Maustaste dreht, rechte Maustaste verschiebt, das Mausrad zoomt.
-  Ein Klick ohne Ziehen zeigt Name, Klasse und Geschoss des Bauteils.
-- Bauteilklasse und Property-Set lassen sich auch im Reiter «Bearbeiten» wählen.
-  Die Felder sind mit denen in «Laden» gekoppelt.
-- Die Tabelle hat vorne die Häkchen-Spalte «3D». Ein Häkchen wählt das Bauteil
-  im Viewer an, mehrere Häkchen sind möglich. Die Kamera fährt zur Auswahl,
-  die Bauteile werden orange, der Rest transparent. Unter dem Viewer stehen
-  ihre aktuellen Werte, auch noch nicht gespeicherte. Die Häkchen sind keine
-  Änderung am Modell und erscheinen nicht im Schritt «Prüfen».
-- In der Seitenleiste: «3D-Ansicht anzeigen» blendet den Viewer aus,
-  «Bauteil beim Anwählen zeigen» schaltet Auswahl und Kamerafahrt ab,
+- Drehen (linke Maustaste), verschieben (rechte), zoomen (Mausrad), feste
+  Ansichten, Geschossfilter und Klassen wie im Reiter «3D-Modell».
+- **Auswählen per Klick:** Klick auf ein Bauteil wählt es aus und setzt das
+  Häkchen in der Spalte «3D». Ctrl+Klick fügt hinzu oder entfernt.
+  «Auswahl aufheben» leert die Auswahl.
+- **Auswählen über die Liste:** Häkchen in der Spalte «3D» wirken gleich, die
+  Kamera fährt zur Auswahl.
+- Liegt das angeklickte Bauteil nicht in der Tabelle (andere Klasse, anderes
+  Pset oder Geschossfilter), wechselt die Tabelle auf seine Klasse und sein Pset.
+- Unter dem Viewer stehen die aktuellen Werte der ausgewählten Bauteile.
+- Seitenleiste: «3D-Ansicht anzeigen» blendet den Viewer aus, «Beim Anwählen
+  hinzoomen» schaltet Kamerafahrt und Transparenz ab (die Auswahl bleibt orange),
   «Transparenz übriges Modell» regelt, wie durchsichtig der Rest wird.
 
-Die Auswahl läuft über eine Häkchen-Spalte, weil die bearbeitbare Tabelle von
-Streamlit keine angeklickte Zeile zurückmeldet. Ein Klick im 3D-Modell setzt
-kein Häkchen, er benennt das Bauteil nur.
-
-Die Geometrie wird beim ersten Öffnen des Reiters einmal berechnet und dann
-zwischengespeichert. Bei grossen Modellen (mehrere tausend Bauteile) dauert
-das spürbar, und der Viewer überträgt entsprechend viele Daten an den Browser.
+Die Häkchen sind keine Änderung am Modell und erscheinen nicht in «Prüfen».
+Die Geometrie wird einmal pro Datei berechnet und zwischengespeichert. Bei
+grossen Modellen (mehrere tausend Bauteile) dauert das spürbar.
 
 ## Reiter «3D-Modell»
 

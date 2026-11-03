@@ -42,18 +42,20 @@ GlobalId, Name und Geschoss lassen sich nicht ändern.
    das ganze Gebäude: drei Geschosse, Fenster in der Südfassade, Treppe im
    Westraum, eine Tür pro Geschoss in der Innenwand.
 2. Mit der Maus drehen, verschieben, zoomen. «⟲ Ganzes Modell» setzt die Kamera zurück.
-3. In der Tabelle bei «Innenwand 120 · 1. OG» das Häkchen in der Spalte «3D» setzen.
-   Erwartet: Die Kamera fährt zur Wand, sie wird orange, der Rest wird
-   transparent. Darunter: FireRating **leer**, IsExternal Nein, LoadBearing Nein.
-4. Zusätzlich «Innenwand 120 · 2. OG» anhaken: Beide Wände sind orange, oben
-   rechts steht «2 Bauteile angewählt».
+3. Im Viewer auf die Innenwand im 1. OG klicken.
+   Erwartet: Sie wird orange, in der Tabelle ist bei «Innenwand 120 · 1. OG» das
+   Häkchen «3D» gesetzt. Darunter: FireRating **leer**, IsExternal Nein, LoadBearing Nein.
+4. Ctrl+Klick auf die Innenwand im 2. OG: Beide sind orange, unten rechts steht
+   «2 Bauteile ausgewählt». Häkchen in der Tabelle entfernen: Die Wand wird abgewählt.
+   Häkchen setzen: Die Kamera fährt zur Auswahl.
 5. Bei der Innenwand im 1. OG `EI60` eintragen: Die Karte unter dem Viewer zeigt sofort EI60.
+   Klick auf eine Tür: Die Tabelle wechselt auf `IfcDoor`, die Tür ist angehakt. Danach wieder `IfcWall`.
 6. Oben im Reiter «Bearbeiten» die Bauteilklasse auf `IfcWindow` stellen:
    Tabelle und Viewer wechseln auf die Fenster, im Reiter «Laden» steht
    ebenfalls `IfcWindow`. Danach wieder `IfcWall` wählen: Die Eingabe EI60
    ist noch da.
-7. In der Seitenleiste «Bauteil beim Anwählen zeigen» ausschalten: Das Modell
-   ist wieder ganz sichtbar, die Häkchen werden ignoriert.
+7. In der Seitenleiste «Beim Anwählen hinzoomen» ausschalten: Die Auswahl bleibt
+   orange, der Rest wird nicht mehr transparent und die Kamera bleibt stehen.
 
 **Dropdowns und Geschossfilter** (Modus «Bestehendes Pset bearbeiten»):
 

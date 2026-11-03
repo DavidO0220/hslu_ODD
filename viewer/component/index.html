@@ -73,6 +73,11 @@
   .legend { position: absolute; right: 10px; bottom: 10px; background: rgba(255,255,255,.88); border-radius: 6px;
             padding: 5px 9px; font-size: 12px; color: #555; display: flex; gap: 10px; z-index: 1; }
   .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; vertical-align: -1px; }
+  /* Modus «select» (kleiner Viewer neben der Tabelle): nur Navigation und Auswahl */
+  body:not(.mode-select) .only-select { display: none !important; }
+  body.mode-select .only-edit { display: none !important; }
+  .sel-label { position: absolute; bottom: 10px; right: 10px; max-width: 40%; background: #e07b1f; color: #fff;
+               border-radius: 6px; padding: 5px 10px; display: none; z-index: 2; }
   .msg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
          color: #666; font-size: 14px; text-align: center; padding: 24px; z-index: 6; background: #eef2f3; }
 </style>
@@ -88,8 +93,10 @@
     <span class="lbl">Geschoss</span>
     <select id="storey"></select>
     <button id="classes-btn" title="Bauteilklassen ein- und ausblenden">Klassen ▾</button>
+    <button id="sel-focus" class="only-select" title="Kamera zur Auswahl" disabled>◎ Zur Auswahl</button>
+    <button id="sel-clear" class="only-select" title="Keine Bauteile ausgewählt" disabled>Auswahl aufheben</button>
   </div>
-  <div class="row">
+  <div class="row only-edit">
     <span class="lbl">Schnitt</span>
     <select id="cut-mode">
       <option value="off">kein Schnitt</option>
@@ -105,7 +112,8 @@
 </div>
 <div class="pop" id="classes-pop"></div>
 
-<div class="panel" id="panel">
+<div class="sel-label only-select" id="sel-label"></div>
+<div class="panel only-edit" id="panel">
   <header>
     <div class="title"><b id="p-name"></b><button class="x" id="p-close" title="Schliessen">×</button></div>
     <div class="sub" id="p-sub"></div>
@@ -122,8 +130,9 @@
   </footer>
 </div>
 
-<div class="hint">Linke Maustaste: drehen · Rechte: verschieben · Mausrad: zoomen · Klick: Eigenschaften</div>
-<div class="legend">
+<div class="hint only-edit">Linke Maustaste: drehen · Rechte: verschieben · Mausrad: zoomen · Klick: Eigenschaften</div>
+<div class="hint only-select">Drehen · Verschieben · Zoomen · Klick: Bauteil wählen · Ctrl+Klick: hinzufügen/entfernen</div>
+<div class="legend only-edit">
   <span><span class="dot" style="background:#e07b1f"></span>ausgewählt</span>
   <span><span class="dot" style="background:#2e9b74"></span>geändert</span>
   <span><span class="dot" style="background:#c8453b"></span>Fehler</span>
@@ -220,6 +229,7 @@ function createApp({ THREE, OrbitControls }) {
   controls.enableDamping = true; controls.dampingFactor = 0.12; controls.screenSpacePanning = true;
 
   const S = {                       // Zustand der Seite
+    mode: "edit", sel: new Set(), selKey: "", focus: true, transparency: 0.85, flyAfterStart: false,
     modelId: null, meshes: [], byId: new Map(), bounds: new THREE.Box3(), storeys: [],
     props: {}, rules: {}, pending: new Map(), pendingState: new Map(),
     storey: "", hiddenClasses: new Set(), selected: null, isolate: false,
@@ -234,7 +244,10 @@ function createApp({ THREE, OrbitControls }) {
     if (!w || !h) return;                         // unsichtbarer Reiter: später nochmals
     renderer.setSize(w, h);
     camera.aspect = w / h; camera.updateProjectionMatrix();
-    if (!S.sizeReady && S.meshes.length) { S.sizeReady = true; jump(viewOf(visibleBounds(), VIEWS.Iso, 1.05)); }
+    if (!S.sizeReady && S.meshes.length) {
+      S.sizeReady = true; jump(viewOf(visibleBounds(), VIEWS.Iso, 1.05));
+      if (S.flyAfterStart) { S.flyAfterStart = false; setTimeout(flyToSelection, 250); }
+    }
   }
   new ResizeObserver(resize).observe(holder);
 
@@ -299,11 +312,13 @@ function createApp({ THREE, OrbitControls }) {
 
   // --- Farben, Sichtbarkeit -------------------------------------------------------
   function paint() {
-    const fade = S.isolate && S.selected ? 0.12 : 1;
+    const pick = S.mode === "select";
+    const fade = pick ? (S.sel.size && S.focus ? Math.max(0.03, 1 - S.transparency) : 1)
+                      : (S.isolate && S.selected ? 0.12 : 1);
     for (const mesh of S.meshes) {
       const u = mesh.userData;
       mesh.visible = (!S.storey || u.storey === S.storey) && !S.hiddenClasses.has(u.cls);
-      const isSel = u.id === S.selected;
+      const isSel = pick ? S.sel.has(u.id) : u.id === S.selected;
       const state = isSel ? "selected" : S.pendingState.get(u.id);
       const glass = u.cls === "IfcWindow" && !state;
       const opacity = isSel ? 1 : (glass ? 0.55 : 1) * fade;
@@ -418,8 +433,40 @@ function createApp({ THREE, OrbitControls }) {
     const cutOn = renderer.clippingPlanes.length > 0;
     const hit = ray.intersectObjects(S.meshes.filter((m) => m.visible), false)
       .find((h) => !cutOn || plane.distanceToPoint(h.point) >= -1e-6);   // weggeschnittene Teile ignorieren
+    if (S.mode === "select") { if (hit) pickInList(hit.object.userData.id, e.ctrlKey || e.metaKey || e.shiftKey); return; }
     select(hit ? hit.object.userData.id : null);
   });
+
+  // --- Auswahlmodus: Klick wählt aus, Python setzt die Häkchen in der Tabelle --------
+  const sendSelection = (ids, clicked) =>
+    sendValue({ nonce: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, action: "select", ids, clicked });
+  function pickInList(id, additive) {
+    const next = new Set(additive ? S.sel : []);
+    if (additive && next.has(id)) next.delete(id); else next.add(id);
+    S.sel = next; S.selKey = [...next].sort().join("|");   // sofort zeigen, Python bestätigt beim nächsten Durchlauf
+    paint(); updateSelection();
+    sendSelection([...next], id);
+  }
+  function selectionBounds() {
+    const box = new THREE.Box3();
+    for (const id of S.sel) { const m = S.byId.get(id); if (m) box.expandByObject(m); }
+    return box;
+  }
+  function flyToSelection() {
+    const box = selectionBounds();
+    if (!box.isEmpty()) flyTo(viewOf(box, currentDir(), 1.3, 1.6));
+  }
+  function updateSelection() {
+    const n = S.sel.size, label = $("sel-label");
+    $("sel-focus").disabled = n === 0; $("sel-clear").disabled = n === 0;
+    if (!n) { label.style.display = "none"; return; }
+    const first = S.byId.get([...S.sel][0]);
+    label.textContent = n === 1 && first ? [first.userData.name || "ohne Name", first.userData.storey].filter(Boolean).join(" · ")
+                                         : `${n} Bauteile ausgewählt`;
+    label.style.display = "block";
+  }
+  $("sel-focus").onclick = flyToSelection;
+  $("sel-clear").onclick = () => { S.sel = new Set(); S.selKey = ""; paint(); updateSelection(); sendSelection([], null); };
   function select(id) {
     if (S.dirty.size && id !== S.selected && !confirmDiscard()) return;
     S.selected = id; S.isolate = false; S.dirty.clear();
@@ -565,6 +612,8 @@ function createApp({ THREE, OrbitControls }) {
   // --- Daten aus Python -----------------------------------------------------------------
   return {
     render(args) {
+      S.mode = args.mode === "select" ? "select" : "edit";
+      document.body.classList.toggle("mode-select", S.mode === "select");
       if (args.model_id !== S.modelId) {
         S.modelId = args.model_id;
         build(args.meshes || []);
@@ -576,6 +625,16 @@ function createApp({ THREE, OrbitControls }) {
         S.pending.set(keyOf(c.guid, c.pset, c.prop), c);
         if (!c.valid) S.pendingState.set(c.guid, "bad");
         else if (S.pendingState.get(c.guid) !== "bad") S.pendingState.set(c.guid, "ok");
+      }
+      if (S.mode === "select") {
+        S.focus = args.focus !== false; S.transparency = Number(args.transparency ?? 0.85);
+        const ids = (args.selected || []).filter((id) => S.byId.has(id));
+        const key = [...ids].sort().join("|");
+        const changed = key !== S.selKey;
+        S.sel = new Set(ids); S.selKey = key;
+        paint(); updateSelection();
+        if (changed && ids.length && S.focus) { if (S.sizeReady) flyToSelection(); else S.flyAfterStart = true; }
+        return;
       }
       paint();
       if (S.selected && !S.dirty.size) { renderPanel(); $("p-status").textContent = ""; }
