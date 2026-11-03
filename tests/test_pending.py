@@ -70,3 +70,44 @@ def test_element_properties(model):
     assert stair["psets"]["Pset_StairCommon"]["FireRating"] == "R30"
     assert stair["psets"]["Pset_StairCommon"]["IsExternal"] == "Nein"
     assert stair["storey"] == "EG" and stair["qtos"] == {}
+
+
+def test_typed_values():
+    assert pending.typed("0,25", "Zahl") == 0.25
+    assert pending.typed("Nein", "Ja/Nein") is False
+    assert pending.typed(" EI30 ", "Text") == "EI30"
+    for bad, kind in (("abc", "Zahl"), ("vielleicht", "Ja/Nein")):
+        try:
+            pending.typed(bad, kind)
+            raise AssertionError(f"{bad} hätte abgelehnt werden müssen")
+        except ValueError:
+            pass
+
+
+def test_create_pset_checks_input():
+    store = {}
+    n, errors = pending.create_pset(store, [("g1", "W", "IfcWall")], "", [("A", "Zahl", "x"), ("A", "Text", "1")], {})
+    assert n == 0 and store == {} and len(errors) == 3   # Name fehlt, Zahl falsch, doppelt
+
+
+def test_new_pset_written_with_types(model_path):
+    """Neues Pset mit Text, Zahl und Ja/Nein an zwei Wänden: Typen stimmen in der IFC-Kopie."""
+    data = model_path.read_bytes()
+    model = ifc_reader.load_model(data)
+    walls = [(w.GlobalId, w.Name, "IfcWall") for w in model.by_type("IfcWall")[:2]]
+    store = {}
+    n, errors = pending.create_pset(store, walls, "CH_Brandschutz",
+                                    [("Nachweis", "Text", "VKF 2015"), ("Dicke", "Zahl", "0,3"), ("Geprueft", "Ja/Nein", "Ja")], {})
+    assert errors == [] and n == 6
+    checked = pending.validate_all(store, load_rules())
+    assert checked["Gueltig"].all()
+    after = ifc_reader.load_model(ifc_writer.apply_changes(data, checked))
+    import ifcopenshell.util.element as eu
+    for guid, _, _ in walls:
+        props = {p.Name: p for rel in after.by_guid(guid).IsDefinedBy
+                 if rel.is_a("IfcRelDefinesByProperties") and rel.RelatingPropertyDefinition.Name == "CH_Brandschutz"
+                 for p in rel.RelatingPropertyDefinition.HasProperties}
+        assert props["Nachweis"].NominalValue.is_a() == "IfcLabel"
+        assert props["Dicke"].NominalValue.is_a() == "IfcReal" and abs(props["Dicke"].NominalValue.wrappedValue - 0.3) < 1e-9
+        assert props["Geprueft"].NominalValue.is_a() == "IfcBoolean" and props["Geprueft"].NominalValue.wrappedValue is True
+        assert eu.get_psets(after.by_guid(guid))["Pset_WallCommon"]   # bestehendes Pset unverändert da

@@ -46,6 +46,10 @@
   .set { margin-top: 10px; }
   .set h4 { margin: 0 0 4px; font-size: 12.5px; color: var(--teal); }
   .set.ro h4 { color: var(--muted); }
+  .part { margin: 12px 0 2px; font-size: 11.5px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+  details.new { margin-top: 10px; border-top: 1px dashed var(--line); padding-top: 6px; }
+  details.new summary { cursor: pointer; color: var(--teal); font-weight: 600; }
+  details.new .set h4 { color: #8a5a00; }
   .prop { display: grid; grid-template-columns: 1fr 160px 22px; gap: 4px 6px; align-items: center;
           padding: 4px 0 4px 6px; border-left: 3px solid transparent; }
   .prop .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -196,7 +200,7 @@ const el = (tag, attrs = {}, ...children) => {
   for (const c of children) if (c !== null && c !== undefined) node.append(c);
   return node;
 };
-const fmt = (v) => (v === null || v === undefined || v === "" ? "" : String(v));
+const fmt = (v) => (v === null || v === undefined || v === "" ? "" : v === true ? "Ja" : v === false ? "Nein" : String(v));
 const keyOf = (guid, pset, prop) => `${guid}\u0001${pset}\u0001${prop}`;
 
 function createApp({ THREE, OrbitControls }) {
@@ -447,14 +451,32 @@ function createApp({ THREE, OrbitControls }) {
     $("p-zoom").textContent = S.isolate ? "◎ Rest wieder zeigen" : "◎ Hinzoomen";
 
     const body = $("p-body"); body.replaceChildren();
-    const psetNames = [...new Set([...Object.keys(p.psets), ...Object.keys(rules)])].sort();
-    if (!psetNames.length) body.append(el("p", { style: "color:#888" }, "Dieses Bauteil hat keine Property-Sets."));
-    for (const pset of psetNames) {
+    const pendingPsets = new Set([...S.pending.values()].filter((c) => c.guid === id).map((c) => c.pset));
+    const existing = Object.keys(p.psets).sort();
+    const fresh = [...new Set([...Object.keys(rules), ...pendingPsets])].filter((n) => !(n in p.psets)).sort();
+    const psetBlock = (pset) => {
       const have = p.psets[pset] || {}, rule = rules[pset] || {};
-      const set = el("div", { class: "set" }, el("h4", {}, pset + (p.psets[pset] ? "" : "  (fehlt, wird angelegt)")));
-      for (const prop of [...new Set([...Object.keys(have), ...Object.keys(rule)])].sort())
+      const pend = [...S.pending.values()].filter((c) => c.guid === id && c.pset === pset).map((c) => c.prop);
+      const set = el("div", { class: "set" }, el("h4", {}, pset));
+      for (const prop of [...new Set([...Object.keys(have), ...Object.keys(rule), ...pend])].sort())
         set.append(propRow(id, pset, prop, prop in have ? have[prop] : null, rule[prop], prop in have));
-      body.append(set);
+      return set;
+    };
+
+    // 1 Bestehende Property-Sets bearbeiten
+    body.append(el("div", { class: "part" }, "Bestehende Property-Sets"));
+    if (!existing.length) body.append(el("p", { style: "color:#888;margin:4px 0" }, "Dieses Bauteil hat noch kein Property-Set."));
+    for (const pset of existing) body.append(psetBlock(pset));
+
+    // 2 Neue Property-Sets anlegen (aus den Regeln oder bereits vorgemerkt)
+    if (fresh.length) {
+      const open = fresh.some((n) => pendingPsets.has(n)) || [...S.dirty.keys()].some((k) => fresh.includes(k.split("\u0001")[1]));
+      const box = el("details", { class: "new", open: open || null },
+        el("summary", {}, `Neues Property-Set anlegen (${fresh.length})`),
+        el("p", { style: "color:#888;margin:4px 0;font-size:12px" },
+          "Diese Sets hat das Bauteil noch nicht. Werte eintragen und übernehmen, beim Speichern wird das Set angelegt. Eigene Sets für mehrere Bauteile: Reiter «Bearbeiten», Modus «Neues Pset anlegen»."));
+      for (const pset of fresh) box.append(psetBlock(pset));
+      body.append(box);
     }
     for (const [qto, values] of Object.entries(p.qtos || {}).sort()) {
       const set = el("div", { class: "set ro" }, el("h4", {}, `${qto} (nur Anzeige)`));
@@ -470,7 +492,8 @@ function createApp({ THREE, OrbitControls }) {
     const key = keyOf(id, pset, prop);
     const pend = S.pending.get(key);
     const current = S.dirty.has(key) ? S.dirty.get(key) : pend ? pend.new : original;
-    const isBool = (rule && rule.type === "bool") || original === YES || original === NO;
+    const isBool = (rule && rule.type === "bool") || original === YES || original === NO
+      || (pend && typeof pend.new === "boolean");
     let input;
     if ((rule && rule.type === "enum") || isBool) {
       const options = isBool ? [YES, NO] : [...rule.values];

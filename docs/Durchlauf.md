@@ -55,6 +55,22 @@ GlobalId, Name und Geschoss lassen sich nicht ändern.
 7. In der Seitenleiste «Bauteil beim Anwählen zeigen» ausschalten: Das Modell
    ist wieder ganz sichtbar, die Häkchen werden ignoriert.
 
+**Dropdowns und Geschossfilter** (Modus «Bestehendes Pset bearbeiten»):
+
+- Bei FireRating öffnet ein Klick in die Zelle eine Auswahl EI30, EI60, EI90.
+  Der Fehlwert EI45 aus dem Modell steht zusätzlich in der Liste.
+- Geschoss «EG»: Die Tabelle zeigt 5 Wände. Danach wieder «alle Geschosse».
+
+**Neues Pset anlegen** (Modus oben umschalten):
+
+1. Bauteilklasse `IfcWall`, Name `CH_Brandschutz`.
+2. Properties: `Nachweis` · Text · `VKF 2015` und `Geprueft` · Ja/Nein · `Ja`.
+3. Geschoss «EG»: In der Bauteilliste stehen 5 Wände.
+4. «Property-Set bei 5 Bauteil(en) vormerken».
+   Erwartet: «10 Werte vorgemerkt». In «Prüfen» stehen 10 gültige Änderungen
+   mit `IfcWall · CH_Brandschutz`.
+5. Gegenprobe: `Dicke` · Zahl · `dick` ergibt die Meldung «passt nicht zum Typ Zahl».
+
 ## 3 3D-Modell
 
 1. Reiter «3 3D-Modell». Das Gebäude füllt den Reiter.

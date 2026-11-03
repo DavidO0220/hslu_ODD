@@ -71,6 +71,31 @@ Die Änderungsliste sammelt alle Eingaben, egal aus welchem Reiter und welcher
 Klasse. Die Tabelle zeigt offene Änderungen bereits an, ein Wechsel der Klasse
 verwirft nichts.
 
+## Reiter «Bearbeiten»: zwei Modi
+
+Oben wählst du, was du tun willst:
+
+**Bestehendes Pset bearbeiten**
+- Bauteilklasse, Property-Set und Geschoss wählen. Die Tabelle zeigt nur
+  Bauteile, die dieses Pset schon haben.
+- Ja/Nein und Wertelisten aus `config/rules.json` sind Auswahlfelder
+  (z. B. FireRating EI30/EI60/EI90). Werte aus dem Modell, die nicht in der
+  Liste stehen, bleiben sichtbar und werden in «Prüfen» als Fehler gemeldet.
+- Properties, die laut Regeln zum Pset gehören, im Modell aber fehlen,
+  erscheinen als leere Spalte und lassen sich nachtragen.
+
+**Neues Pset anlegen**
+- Bauteilklasse wählen, Namen eingeben oder eine Vorlage aus den Regeln nehmen.
+- Properties mit Typ eintragen: Text (IfcLabel), Zahl (IfcReal), Ja/Nein
+  (IfcBoolean). Der Typ ist nötig, weil IfcOpenShell bei neuen Properties ohne
+  Vorlage den IFC-Typ aus dem Wert ableitet.
+- Bauteile auswählen, die das Set bekommen (nur solche, die es noch nicht haben),
+  optional nach Geschoss. Der Wert gilt für alle gewählten Bauteile.
+- «Property-Set … vormerken» trägt die Werte in die Änderungsliste ein.
+  Geprüft und gespeichert wird wie immer in «Prüfen» und «Speichern».
+- Eigene Sets nicht mit «Pset_» beginnen lassen, das Präfix ist für
+  buildingSMART reserviert. Die App warnt dann.
+
 ## 3D-Viewer
 
 Im Reiter «Bearbeiten» steht rechts neben der Tabelle das Modell in 3D.
@@ -107,9 +132,11 @@ Das Modell füllt den Reiter, alle Werkzeuge liegen im Viewer selbst:
   «auf Geschoss …» setzt einen Grundriss 1.5 m über die Geschossunterkante und
   schaut von oben. Die Schnittflächen sind offen (man sieht in die Bauteile).
 - **Pop-up:** Klick auf ein Bauteil zeigt Name, Klasse, Geschoss, GlobalId und
-  alle Property-Sets. Alle Werte sind bearbeitbar. Ja/Nein und Wertelisten aus
-  den Regeln erscheinen als Auswahl. Properties, die laut Regeln fehlen, stehen
-  mit «fehlt» da und lassen sich ergänzen. Mengen (Qto) werden nur angezeigt.
+  zwei getrennte Bereiche: «Bestehende Property-Sets» (bearbeiten, fehlende
+  Properties laut Regeln mit «fehlt» ergänzen) und «Neues Property-Set anlegen»
+  (Sets aus den Regeln, die das Bauteil noch nicht hat, und bereits vorgemerkte
+  neue Sets). Ja/Nein und Wertelisten erscheinen als Auswahl. Mengen (Qto) werden
+  nur angezeigt.
   «Übernehmen» schickt die Eingaben an Python, das Prüfergebnis erscheint im
   Pop-up. «◎ Hinzoomen» fährt zum Bauteil und macht den Rest transparent.
 - **Farben:** orange = ausgewählt, grün = offene gültige Änderung, rot = Fehler.

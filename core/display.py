@@ -30,3 +30,12 @@ def to_display(table: pd.DataFrame) -> pd.DataFrame:
     for col in bool_columns(table):
         shown[col] = [None if v is None or pd.isna(v) else (YES if v else NO) for v in table[col]]
     return shown
+
+
+def add_columns(table: pd.DataFrame, names) -> pd.DataFrame:
+    """Leere Spalten für Properties ergänzen, die laut Regeln fehlen (zum Nachtragen)."""
+    out = table.copy()
+    for name in names:
+        if name not in out.columns:
+            out[name] = pd.Series([None] * len(out), index=out.index, dtype=object)
+    return out

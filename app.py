@@ -31,14 +31,16 @@ import streamlit as st
 
 import viewer
 from core import changelog, geometry, ifc_reader, ifc_writer, pending
-from core.display import NO, YES, bool_columns, to_display
+from core.display import NO, YES, add_columns, bool_columns, to_display
 from core.schema import (COL_CLASS, COL_GLOBAL_ID, COL_MESSAGE, COL_NAME, COL_NEW, COL_OLD, COL_PROPERTY,
                          COL_PSET, COL_STOREY, COL_VALID, LOCKED_COLUMNS)
-from core.validator import load_rules
+from core.validator import load_rules, rules_for_class
 
 TEST_MODEL = Path(__file__).resolve().parent / "data" / "testmodell.ifc"
 COL_SHOW = "3D"   # Häkchen-Spalte: Bauteil im Viewer zeigen. Nur Oberfläche, wird nie geschrieben.
 MAX_CARDS = 5     # so viele angewählte Bauteile werden unter dem Viewer mit Werten gezeigt
+ALL_STOREYS = "alle Geschosse"
+MODE_EDIT, MODE_NEW = "Bestehendes Pset bearbeiten", "Neues Pset anlegen"
 
 st.set_page_config(page_title="IFC-Property-Editor", layout="wide")
 
@@ -160,6 +162,97 @@ def pick_class_and_pset(prefix: str):
     return ifc_class, pick("Property-Set", psets, "pset", f"{prefix}_pset", col2)
 
 
+def column_config_for(table: pd.DataFrame, raw: pd.DataFrame, pset_rules: dict) -> dict:
+    """Auswahlfelder in der Tabelle: Ja/Nein und Wertelisten aus den Regeln, sonst freier Text."""
+    config = {}
+    bools = set(bool_columns(raw)) | {p for p, r in pset_rules.items() if r.get("type") == "bool"}
+    for col in table.columns:
+        rule = pset_rules.get(col, {})
+        if col in bools:
+            config[col] = st.column_config.SelectboxColumn(col, options=[YES, NO])
+        elif rule.get("type") == "enum":
+            allowed = list(rule.get("values", []))
+            # Werte aus dem Modell, die nicht in der Liste stehen (z. B. EI45), bleiben sichtbar
+            extra = sorted({str(v) for v in table[col] if v is not None and not pd.isna(v)} - set(allowed))
+            config[col] = st.column_config.SelectboxColumn(
+                col, options=allowed + extra, help=f"Werteliste: {', '.join(allowed)}")
+        elif rule.get("type") == "float":
+            low, high = rule.get("min"), rule.get("max")
+            config[col] = st.column_config.TextColumn(col, help=f"Zahl zwischen {low} und {high}")
+    return config
+
+
+def pick_storey(storeys: list[str], key: str, where=st) -> str:
+    """Geschossfilter. Gibt ALL_STOREYS oder ein Geschoss zurück."""
+    options = [ALL_STOREYS, *storeys]
+    if st.session_state.get(key) not in options:
+        st.session_state[key] = ALL_STOREYS
+    return where.selectbox("Geschoss", options, key=key)
+
+
+def new_pset_form(file_bytes: bytes, ifc_class: str, store: dict) -> None:
+    """Formular: ein neues Property-Set für mehrere Bauteile einer Klasse vormerken."""
+    props = get_properties(file_bytes)
+    class_rules = rules_for_class(get_rules(), ifc_class)
+    elements = {g: p for g, p in props.items() if p["cls"] == ifc_class}
+    if not elements:
+        st.info(f"Im Modell gibt es keine Bauteile der Klasse {ifc_class}.")
+        return
+
+    c1, c2, c3 = st.columns([1.2, 1, 1])
+    template = c2.selectbox("Vorlage", ["— ohne Vorlage —", *class_rules], key=f"new_tpl::{ifc_class}",
+                            help="Property-Sets, für die in config/rules.json Regeln stehen")
+    from_rules = template in class_rules
+    name = c1.text_input("Name des neuen Property-Sets", value=template if from_rules else "",
+                         key=f"new_name::{ifc_class}::{template}", placeholder="z. B. CH_Brandschutz")
+    name = name.strip()
+    if name.startswith("Pset_") and name not in class_rules:
+        st.warning("Das Präfix «Pset_» ist für die Standard-Sets von buildingSMART reserviert. "
+                   "Für eigene Sets ein eigenes Präfix verwenden, zum Beispiel «CH_» oder ein Firmenkürzel.")
+
+    pset_rules = class_rules.get(name, {})
+    if from_rules:
+        start = pd.DataFrame([{"Property": p, "Typ": pending.RULE_KIND.get(r.get("type"), pending.KIND_TEXT), "Wert": None}
+                              for p, r in class_rules[template].items()])
+    else:
+        start = pd.DataFrame({"Property": [None] * 3, "Typ": [pending.KIND_TEXT] * 3, "Wert": [None] * 3})
+    st.write("**Properties** — eine Zeile pro Property. Der Wert gilt für alle gewählten Bauteile.")
+    rows = st.data_editor(
+        start, num_rows="dynamic", hide_index=True, key=f"new_rows::{ifc_class}::{template}",
+        column_config={
+            "Property": st.column_config.TextColumn("Property"),
+            "Typ": st.column_config.SelectboxColumn("Typ", options=pending.KINDS, required=True,
+                                                    help="Bestimmt den IFC-Typ: Text, Zahl (IfcReal), Ja/Nein (IfcBoolean)"),
+            "Wert": st.column_config.TextColumn("Wert"),
+        },
+    )
+    hints = [f"{p}: {', '.join(r['values'])}" for p, r in pset_rules.items() if r.get("type") == "enum"]
+    if hints:
+        st.caption("Wertelisten laut Regeln · " + " · ".join(hints))
+
+    without = [g for g, p in elements.items() if not name or name not in p["psets"]]
+    storey = pick_storey(sorted({elements[g]["storey"] for g in without}), f"new_storey::{ifc_class}", c3)
+    candidates = [g for g in without if storey == ALL_STOREYS or elements[g]["storey"] == storey]
+    label = lambda g: f"{elements[g]['name'] or 'ohne Name'} · {elements[g]['storey'] or 'ohne Geschoss'}"  # noqa: E731
+    targets = st.multiselect("Bauteile, die das neue Property-Set bekommen", candidates, default=candidates,
+                             format_func=label, key=f"new_targets::{ifc_class}::{name}::{storey}")
+    already = len(elements) - len(without)
+    if name and already:
+        st.caption(f"{already} Bauteil(e) haben «{name}» schon und fehlen in der Liste. "
+                   f"Ihre Werte änderst du im Modus «{MODE_EDIT}».")
+
+    if st.button(f"Property-Set bei {len(targets)} Bauteil(en) vormerken", type="primary",
+                 disabled=not name or not targets):
+        n, errors = pending.create_pset(
+            store, [(g, elements[g]["name"], ifc_class) for g in targets], name,
+            [(r["Property"], r["Typ"], r["Wert"]) for _, r in rows.iterrows()], pset_rules)
+        for message in errors:
+            st.error(message)
+        if not errors:
+            restart_editor()
+            st.success(f"{n} Werte vorgemerkt. Geprüft und gespeichert wird in «Prüfen» und «Speichern».")
+
+
 def reset_downstream() -> None:
     """Datei, Klasse oder Pset gewechselt: alte Bearbeitungen und Ergebnisse verwerfen."""
     for key in ("result_ifc", "result_log"):
@@ -229,38 +322,66 @@ with tab_load:
 edited = None
 selected_ids: list[str] = []
 with tab_edit:
-    if classes:
-        pick_class_and_pset("edit")   # dieselbe Auswahl wie in «Laden»
-    if table is None:
-        st.info("Zuerst im Schritt «Laden» eine Datei, eine Klasse und ein Property-Set wählen.")
+    if not classes:
+        st.info("Zuerst im Schritt «Laden» eine Datei laden.")
     else:
-        st.write(f"**{ifc_class} · {pset}** — Werte direkt in der Tabelle ändern. "
-                 "GlobalId, Name und Geschoss sind gesperrt. Zelle leeren entfernt den Wert.")
-        left, right = st.columns([1.15, 1], gap="medium") if show_3d else (st.container(), None)
-        with left:
-            # Häkchen-Spalte vorne, Ja/Nein-Properties als Auswahlfeld, alle anderen als freie Texteingabe
-            config = {col: st.column_config.SelectboxColumn(col, options=[YES, NO]) for col in bool_columns(raw_table)}
-            config[COL_SHOW] = st.column_config.CheckboxColumn(COL_SHOW, help="Bauteil im 3D-Viewer zeigen", width="small")
-            shown = pending.apply(table, store, pset)      # Tabelle mit den offenen Änderungen
-            with_show = shown.copy()
-            with_show.insert(0, COL_SHOW, False)
-            edited_full = st.data_editor(
-                with_show,
-                disabled=LOCKED_COLUMNS,
-                hide_index=True,
-                column_config=config,
-                num_rows="fixed",
-                key=f"editor::{'::'.join(map(str, st.session_state['context']))}::{st.session_state['editor_rev']}",
-            )
-            selected_ids = list(edited_full.loc[edited_full[COL_SHOW] == True, COL_GLOBAL_ID])  # noqa: E712
-            edited = edited_full.drop(columns=[COL_SHOW])   # die Häkchen sind keine Änderung am Modell
-            pending.merge_edits(store, table, shown, edited, ifc_class, pset)
-            others = sum(1 for (_, ps, _), e in store.items() if e[COL_CLASS] != ifc_class or ps != pset)
-            if others:
-                st.caption(f"Dazu {others} offene Änderung(en) in anderen Klassen oder Property-Sets, siehe «Prüfen».")
-        if right is not None:
-            with right:
-                show_3d_panel(ifc_bytes, edited, selected_ids, ifc_class)
+        mode = st.radio("Modus", [MODE_EDIT, MODE_NEW], horizontal=True, key="edit_mode", label_visibility="collapsed")
+
+    if classes and mode == MODE_NEW:
+        st.caption("Ein Property-Set anlegen, das die gewählten Bauteile noch nicht haben.")
+        new_class = pick("Bauteilklasse", classes, "ifc_class", "new_class", st.columns(3)[0])
+        new_pset_form(ifc_bytes, new_class, store)
+
+    elif classes:
+        st.caption("Werte in einem Property-Set ändern, das die Bauteile schon haben.")
+        pick_class_and_pset("edit")   # dieselbe Auswahl wie in «Laden»
+        if table is None:
+            st.info(f"Die Klasse hat noch kein Property-Set. Eines im Modus «{MODE_NEW}» anlegen.")
+        else:
+            props_all = get_properties(ifc_bytes)
+            with_pset = {g for g, p in props_all.items() if pset in p["psets"]}
+            rows = table[table[COL_GLOBAL_ID].isin(with_pset)]
+            pset_rules = rules_for_class(get_rules(), ifc_class).get(pset, {})
+            added = [p for p in pset_rules if p not in rows.columns]
+            rows = add_columns(rows, added)          # Properties laut Regeln, die im Modell noch fehlen
+            storey = pick_storey(sorted({s for s in rows[COL_STOREY] if s}), "edit_storey", st.columns(3)[0])
+            view = rows if storey == ALL_STOREYS else rows[rows[COL_STOREY] == storey]
+
+            st.write(f"**{ifc_class} · {pset}** — {len(view)} Bauteil(e). Werte direkt in der Tabelle ändern. "
+                     "GlobalId, Name und Geschoss sind gesperrt. Zelle leeren entfernt den Wert.")
+            notes = []
+            if len(rows) < len(table):
+                notes.append(f"{len(table) - len(rows)} Bauteil(e) der Klasse haben dieses Property-Set nicht, "
+                             f"anlegen im Modus «{MODE_NEW}»")
+            if added:
+                notes.append(f"Spalten aus den Regeln, die im Modell noch fehlen: {', '.join(added)}")
+            if notes:
+                st.caption(" · ".join(notes))
+
+            left, right = st.columns([1.15, 1], gap="medium") if show_3d else (st.container(), None)
+            with left:
+                shown = pending.apply(view, store, pset)      # Tabelle mit den offenen Änderungen
+                config = column_config_for(shown, raw_table, pset_rules)
+                config[COL_SHOW] = st.column_config.CheckboxColumn(COL_SHOW, help="Bauteil im 3D-Viewer zeigen", width="small")
+                with_show = shown.copy()
+                with_show.insert(0, COL_SHOW, False)
+                edited_full = st.data_editor(
+                    with_show,
+                    disabled=LOCKED_COLUMNS,
+                    hide_index=True,
+                    column_config=config,
+                    num_rows="fixed",
+                    key=f"editor::{'::'.join(map(str, st.session_state['context']))}::{storey}::{st.session_state['editor_rev']}",
+                )
+                selected_ids = list(edited_full.loc[edited_full[COL_SHOW] == True, COL_GLOBAL_ID])  # noqa: E712
+                edited = edited_full.drop(columns=[COL_SHOW])   # die Häkchen sind keine Änderung am Modell
+                pending.merge_edits(store, view, shown, edited, ifc_class, pset)
+                others = sum(1 for (_, ps, _), e in store.items() if e[COL_CLASS] != ifc_class or ps != pset)
+                if others:
+                    st.caption(f"Dazu {others} offene Änderung(en) in anderen Klassen oder Property-Sets, siehe «Prüfen».")
+            if right is not None:
+                with right:
+                    show_3d_panel(ifc_bytes, edited, selected_ids, ifc_class)
 
 # =============================== 3 3D-Modell =================================
 with tab_3d:
@@ -284,8 +405,17 @@ with tab_3d:
                 if info is not None:
                     for c in value.get("changes", []):
                         original = info["psets"].get(c["pset"], {}).get(c["prop"])
+                        new_value = c.get("value")
+                        # Wert eines neu angelegten Psets: Typ (Zahl, Ja/Nein) der Vormerkung beibehalten
+                        before = store.get((value["guid"], c["pset"], c["prop"]))
+                        if before is not None and original is None and not isinstance(before[COL_NEW], str):
+                            kind = pending.KIND_BOOL if isinstance(before[COL_NEW], bool) else pending.KIND_NUMBER
+                            try:
+                                new_value = pending.typed(new_value, kind)
+                            except ValueError:
+                                pass
                         pending.put(store, value["guid"], info["name"], info["cls"], c["pset"], c["prop"],
-                                    original, c.get("value"))
+                                    original, new_value)
                     restart_editor()
                     st.rerun()
             n_bad = int((~checked_now[COL_VALID].astype(bool)).sum()) if len(checked_now) else 0
