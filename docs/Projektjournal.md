@@ -70,6 +70,7 @@ Daten der Commits aus `git log`. Schritte ohne Commit sind nach Phase eingeordne
 | 5.11 | Stand gegen ZP1 erneut abgeglichen; Dokument «Coaching-Themen und Ausblick» erstellt (7 Punkte fürs Coaching, 13 Zukunftsthemen) | Offen vor allem: Ablauf in der echten App, zweites Modell, Zusammenführen in main, KI-Einsatz mit dem Dozenten klären |
 | 5.12 | Fünf Layout-Vorschläge als Bilder (Mockups mit Testmodell-Daten und echten Viewer-Aufnahmen): 1 Geführter Ablauf, 2 Eine Arbeitsfläche, 3 Aufgaben zuerst, 4 Prüfen und Speichern auf einer Seite, 5 Bauteil für Bauteil | Grundlage für den Entscheid zur Überarbeitung der Oberfläche; noch nichts umgesetzt |
 | 5.13 | Vorschlag 2 «Eine Arbeitsfläche» von David gewählt; alle Bereiche in diesem Layout als Bilder: Laden, Arbeitsfläche (Werte bearbeiten, 3D gross mit Schnitt, Neues Pset), Prüfen & Speichern, Regeln | Aus 6 Reitern werden 4 Bereiche; ein Viewer statt zwei; Pop-up wird Eigenschaften-Spalte rechts; Einstellungen als Menü im Viewer. Noch nicht umgesetzt |
+| 5.14 | Vorschläge für das ausgegebene Protokoll als Excel-Ansichten: heutiger Stand (CSV), A erweitertes Änderungsprotokoll, B Arbeitsmappe mit Deckblatt, Änderungen, Offene Mängel, Regeln, C Bauteilliste pro Klasse | Noch nicht umgesetzt; Entscheid von David ausstehend |
 
 ---
 
