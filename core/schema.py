@@ -26,6 +26,9 @@ CHANGE_COLUMNS = [COL_GLOBAL_ID, COL_NAME, COL_PSET, COL_PROPERTY, COL_OLD, COL_
 # Gemeinsame Änderungsliste (core/pending.py): zusätzlich die Bauteilklasse,
 # weil Änderungen aus mehreren Klassen zusammenkommen (Tabelle und 3D-Viewer)
 COL_CLASS = "Klasse"
+# Herkunft und Zeitpunkt jeder Eingabe, für das Blatt «Änderungen» der Bauteilliste
+COL_SOURCE = "Eingabe über"      # Tabelle, Eigenschaften, 3D-Modell, Neues Pset
+COL_ENTERED = "Erfasst"          # Zeitpunkt der Eingabe, JJJJ-MM-TT HH:MM
 
 # Vom Validator ergänzt
 COL_VALID = "Gueltig"

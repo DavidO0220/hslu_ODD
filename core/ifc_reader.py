@@ -63,6 +63,16 @@ def storey_name(element) -> str:
     return container.Name if container is not None and container.Name else ""
 
 
+def storey_order(model: ifcopenshell.file) -> list[str]:
+    """Geschossnamen von unten nach oben (nach Elevation), für Listen und Filter."""
+    storeys = sorted(model.by_type("IfcBuildingStorey"), key=lambda s: (s.Elevation is None, s.Elevation or 0.0))
+    seen = []
+    for s in storeys:
+        if s.Name and s.Name not in seen:
+            seen.append(s.Name)
+    return seen
+
+
 def to_table(model: ifcopenshell.file, ifc_class: str, pset_name: str) -> pd.DataFrame:
     """Baut die Tabelle für die Oberfläche: eine Zeile pro Bauteil.
 

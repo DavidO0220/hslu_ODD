@@ -15,14 +15,19 @@ Ablauf in der Oberfläche:
 - Prüfen und Speichern: validate_all() über alle Klassen.
 """
 
+from datetime import datetime
+
 import pandas as pd
 
 from core.diff import _same, find_changes, normalize
-from core.schema import (CHANGE_COLUMNS, COL_CLASS, COL_GLOBAL_ID, COL_NAME, COL_NEW, COL_OLD,
-                         COL_PROPERTY, COL_PSET, VALIDATED_COLUMNS)
+from core.schema import (CHANGE_COLUMNS, COL_CLASS, COL_ENTERED, COL_GLOBAL_ID, COL_NAME, COL_NEW, COL_OLD,
+                         COL_PROPERTY, COL_PSET, COL_SOURCE, VALIDATED_COLUMNS)
 from core.validator import to_bool, validate
 
-STORE_COLUMNS = CHANGE_COLUMNS + [COL_CLASS]
+STORE_COLUMNS = CHANGE_COLUMNS + [COL_CLASS, COL_SOURCE, COL_ENTERED]
+
+# Herkunft einer Eingabe (Spalte «Eingabe über» im Protokoll)
+SOURCE_TABLE, SOURCE_FORM, SOURCE_3D, SOURCE_NEW = "Tabelle", "Eigenschaften", "3D-Modell", "Neues Pset"
 
 # Typen für Properties eines neuen Psets. Der Python-Typ bestimmt beim Schreiben
 # den IFC-Typ: Text -> IfcLabel, Zahl -> IfcReal, Ja/Nein -> IfcBoolean.
@@ -31,15 +36,30 @@ KINDS = [KIND_TEXT, KIND_NUMBER, KIND_BOOL]
 RULE_KIND = {"enum": KIND_TEXT, "float": KIND_NUMBER, "bool": KIND_BOOL, "pattern": KIND_TEXT, "text": KIND_TEXT}
 
 
-def put(store: dict, guid: str, name: str, ifc_class: str, pset: str, prop: str, old, new) -> None:
-    """Änderung eintragen. Ist der neue Wert wieder der Originalwert, fällt sie weg."""
+def put(store: dict, guid: str, name: str, ifc_class: str, pset: str, prop: str, old, new,
+        source: str = "", now: datetime | None = None) -> None:
+    """Änderung eintragen. Ist der neue Wert wieder der Originalwert, fällt sie weg.
+
+    source: woher die Eingabe kommt (SOURCE_*). Bleibt der Wert gleich, bleiben
+    Herkunft und Zeitpunkt der ersten Eingabe stehen. Das ist wichtig, weil die
+    Tabelle ihre Eingaben bei jedem Durchlauf von Streamlit erneut meldet.
+    """
     old, new = normalize(old), normalize(new)
     key = (guid, pset, prop)
     if _same(old, new):
         store.pop(key, None)
         return
+    before = store.get(key)
+    if before is not None and _same(before[COL_NEW], new) and type(before[COL_NEW]) is type(new):
+        return
     store[key] = {COL_GLOBAL_ID: guid, COL_NAME: name, COL_PSET: pset, COL_PROPERTY: prop,
-                  COL_OLD: old, COL_NEW: new, COL_CLASS: ifc_class}
+                  COL_OLD: old, COL_NEW: new, COL_CLASS: ifc_class, COL_SOURCE: source,
+                  COL_ENTERED: (now or datetime.now()).strftime("%Y-%m-%d %H:%M")}
+
+
+def remove(store: dict, keys) -> int:
+    """Änderungen aus der Liste entfernen, keys: [(GlobalId, Pset, Property)]. Rückgabe: Anzahl."""
+    return sum(store.pop(tuple(k), None) is not None for k in keys)
 
 
 def apply(table: pd.DataFrame, store: dict, pset: str) -> pd.DataFrame:
@@ -53,7 +73,7 @@ def apply(table: pd.DataFrame, store: dict, pset: str) -> pd.DataFrame:
 
 
 def merge_edits(store: dict, original: pd.DataFrame, shown: pd.DataFrame, edited: pd.DataFrame,
-                ifc_class: str, pset: str) -> int:
+                ifc_class: str, pset: str, source: str = SOURCE_TABLE) -> int:
     """Neue Eingaben aus dem Tabelleneditor übernehmen.
 
     original: Tabelle aus dem Modell, shown: was der Editor gezeigt hat
@@ -66,7 +86,7 @@ def merge_edits(store: dict, original: pd.DataFrame, shown: pd.DataFrame, edited
     base = original.set_index(COL_GLOBAL_ID)
     for _, c in changes.iterrows():
         put(store, c[COL_GLOBAL_ID], c[COL_NAME], ifc_class, pset, c[COL_PROPERTY],
-            base.at[c[COL_GLOBAL_ID], c[COL_PROPERTY]], c[COL_NEW])
+            base.at[c[COL_GLOBAL_ID], c[COL_PROPERTY]], c[COL_NEW], source)
     return len(changes)
 
 
@@ -79,12 +99,14 @@ def to_frame(store: dict) -> pd.DataFrame:
 def validate_all(store: dict, rules: dict) -> pd.DataFrame:
     """Alle offenen Änderungen prüfen, jede mit den Regeln ihrer Klasse."""
     frame = to_frame(store)
+    extra = [COL_CLASS, COL_SOURCE, COL_ENTERED]
     if frame.empty:
-        return pd.DataFrame(columns=VALIDATED_COLUMNS + [COL_CLASS])
+        return pd.DataFrame(columns=VALIDATED_COLUMNS + extra)
     parts = []
     for ifc_class, group in frame.groupby(COL_CLASS, sort=False):
         checked = validate(group[CHANGE_COLUMNS], ifc_class, rules)
-        checked[COL_CLASS] = ifc_class
+        for col in extra:
+            checked[col] = group[col].values
         parts.append(checked)
     return pd.concat(parts, ignore_index=True)
 
@@ -153,5 +175,5 @@ def create_pset(store: dict, elements: list[tuple[str, str, str]], pset_name: st
         return 0, errors
     for guid, element_name, ifc_class in elements:
         for prop, value in cleaned:
-            put(store, guid, element_name, ifc_class, name, prop, None, value)
+            put(store, guid, element_name, ifc_class, name, prop, None, value, SOURCE_NEW)
     return len(elements) * len(cleaned), []
