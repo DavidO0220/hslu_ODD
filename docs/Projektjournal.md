@@ -71,6 +71,7 @@ Daten der Commits aus `git log`. Schritte ohne Commit sind nach Phase eingeordne
 | 5.12 | Fünf Layout-Vorschläge als Bilder (Mockups mit Testmodell-Daten und echten Viewer-Aufnahmen): 1 Geführter Ablauf, 2 Eine Arbeitsfläche, 3 Aufgaben zuerst, 4 Prüfen und Speichern auf einer Seite, 5 Bauteil für Bauteil | Grundlage für den Entscheid zur Überarbeitung der Oberfläche; noch nichts umgesetzt |
 | 5.13 | Vorschlag 2 «Eine Arbeitsfläche» von David gewählt; alle Bereiche in diesem Layout als Bilder: Laden, Arbeitsfläche (Werte bearbeiten, 3D gross mit Schnitt, Neues Pset), Prüfen & Speichern, Regeln | Aus 6 Reitern werden 4 Bereiche; ein Viewer statt zwei; Pop-up wird Eigenschaften-Spalte rechts; Einstellungen als Menü im Viewer. Noch nicht umgesetzt |
 | 5.14 | Vorschläge für das ausgegebene Protokoll als Excel-Ansichten: heutiger Stand (CSV), A erweitertes Änderungsprotokoll, B Arbeitsmappe mit Deckblatt, Änderungen, Offene Mängel, Regeln, C Bauteilliste pro Klasse | Noch nicht umgesetzt; Entscheid von David ausstehend |
+| 5.15 | David wählt Vorschlag C (Bauteilliste pro Klasse) mit Übersichtsblatt als Start; Übersicht als Bild: Modell, Prüfsummen, Regeln, Vorher/Nachher, eine Zeile pro Klasse mit Link auf ihr Blatt, abgelehnte Eingaben, Visum | Abgelehnte Eingaben stehen auf der Übersicht, weil die Klassenblätter nur den gespeicherten Endstand zeigen. Noch nicht umgesetzt |
 
 ---
 
