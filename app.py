@@ -7,21 +7,42 @@ Die Oberfläche enthält keine IFC-Logik. Sie ruft nur Funktionen aus core/ auf.
 Zwei Eigenheiten von Streamlit bestimmen den Aufbau:
 - Bei jedem Klick läuft dieses Skript von oben neu durch. Das Modell wird
   deshalb mit st.cache_resource nur einmal geladen.
-- Die vier Schritte sind Reiter (st.tabs). Streamlit führt alle Reiter bei
+- Die Schritte sind Reiter (st.tabs). Streamlit führt alle Reiter bei
   jedem Durchlauf aus, so bleiben Eingaben erhalten, wenn man zwischen den
   Schritten wechselt.
+
+Alle offenen Änderungen liegen in einer gemeinsamen Liste (core/pending.py,
+in st.session_state["pending"]). Die Tabelle in «Bearbeiten» und das Pop-up
+im Reiter «3D-Modell» schreiben beide hinein, «Prüfen» und «Speichern» lesen
+daraus. Ein Wechsel der Klasse verwirft deshalb keine Eingaben.
+
+Im Schritt «Bearbeiten» steht neben der Tabelle der kleine 3D-Viewer (viewer/).
+Die bearbeitbare Tabelle meldet keine angeklickte Zeile zurück. Bauteile
+werden deshalb über die Häkchen-Spalte «3D» in der Tabelle angewählt.
+
+Bauteilklasse und Property-Set lassen sich in «Laden» und «Bearbeiten»
+wählen. Beide Auswahlfelder sind gekoppelt (siehe pick).
 """
 
+import json
 from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 
-from core import changelog, diff, ifc_reader, ifc_writer
-from core.display import NO, YES, bool_columns, to_display
-from core.schema import COL_MESSAGE, COL_NAME, COL_NEW, COL_OLD, COL_PROPERTY, COL_VALID, LOCKED_COLUMNS
-from core.validator import load_rules, validate
+import viewer
+from core import changelog, geometry, ids_import, ifc_reader, ifc_writer, model_check, pending, rules_store
+from core.display import NO, YES, add_columns, bool_columns, to_display
+from core.schema import (COL_CLASS, COL_GLOBAL_ID, COL_MESSAGE, COL_NAME, COL_NEW, COL_OLD, COL_PROPERTY,
+                         COL_PSET, COL_STOREY, COL_VALID, LOCKED_COLUMNS)
+from core.validator import STANDARD_RULES_PATH, load_rules, merge_rules, rules_for_class
 
 TEST_MODEL = Path(__file__).resolve().parent / "data" / "testmodell.ifc"
+EXAMPLE_IDS = Path(__file__).resolve().parent / "config" / "beispiel_anforderungen.ids"
+COL_SHOW = "3D"   # Häkchen-Spalte: Bauteil im Viewer zeigen. Nur Oberfläche, wird nie geschrieben.
+MAX_CARDS = 5     # so viele angewählte Bauteile werden unter dem Viewer mit Werten gezeigt
+ALL_STOREYS = "alle Geschosse"
+MODE_EDIT, MODE_NEW = "Bestehendes Pset bearbeiten", "Neues Pset anlegen"
 
 st.set_page_config(page_title="IFC-Property-Editor", layout="wide")
 
@@ -39,8 +60,230 @@ def get_table(file_bytes: bytes, ifc_class: str, pset: str):
 
 
 @st.cache_data
-def get_rules() -> dict:
+def base_rules() -> dict:
+    """Regeln aus config/rules.json."""
     return load_rules()
+
+
+@st.cache_data
+def read_ids(data: bytes):
+    """IDS-Datei lesen: (Regeln, Hinweise, Info). Wirft IdsError bei ungültiger Datei."""
+    return ids_import.parse_ids(data)
+
+
+def get_rules() -> dict:
+    """Aktive Regeln: rules.json, ergänzt oder ersetzt durch eine IDS (Seitenleiste «Prüfregeln»)."""
+    return RULES
+
+
+@st.cache_resource(show_spinner="3D-Geometrie wird berechnet …")
+def get_meshes(file_bytes: bytes) -> list[dict]:
+    """Geometrie nur einmal pro Datei berechnen, das dauert bei grossen Modellen."""
+    return geometry.load_meshes(get_model(file_bytes))
+
+
+@st.cache_resource(show_spinner="Eigenschaften werden gelesen …")
+def get_properties(file_bytes: bytes) -> dict:
+    """Alle Eigenschaften aller Bauteile, für das Pop-up im Reiter «3D-Modell»."""
+    return ifc_reader.element_properties(get_model(file_bytes))
+
+
+def change_store(file_key) -> dict:
+    """Die gemeinsame Änderungsliste. Eine neue Datei beginnt mit einer leeren Liste."""
+    if "pending" not in st.session_state or st.session_state.get("store_file") != file_key:
+        st.session_state["store_file"] = file_key
+        st.session_state["pending"] = {}
+        st.session_state["editor_rev"] = 0
+        st.session_state["sel3d"] = []      # Auswahl im kleinen Viewer
+    return st.session_state["pending"]
+
+
+def restart_editor() -> None:
+    """Tabelleneditor neu aufsetzen, damit er Änderungen von aussen (3D, Verwerfen) zeigt."""
+    st.session_state["editor_rev"] = st.session_state.get("editor_rev", 0) + 1
+
+
+def pending_for_viewer(store: dict, checked: pd.DataFrame) -> list[dict]:
+    """Offene Änderungen mit Prüfergebnis in der Form für das Pop-up (Werte in Anzeigeform)."""
+    result = {(r[COL_GLOBAL_ID], r[COL_PSET], r[COL_PROPERTY]): (bool(r[COL_VALID]), r[COL_MESSAGE] or "")
+              for _, r in checked.iterrows()}
+    return [{"guid": g, "pset": ps, "prop": pr, "old": e[COL_OLD], "new": e[COL_NEW],
+             "valid": result.get((g, ps, pr), (True, ""))[0], "msg": result.get((g, ps, pr), (True, ""))[1]}
+            for (g, ps, pr), e in store.items()]
+
+
+def _text(value) -> str:
+    return "leer" if value is None or (isinstance(value, float) and value != value) else str(value)
+
+
+def show_3d_panel(file_bytes: bytes, current: pd.DataFrame, ifc_class: str) -> None:
+    """Kleiner Viewer neben der Tabelle. Klick im 3D wählt aus, wie ein Häkchen in der Spalte «3D»."""
+    try:
+        meshes = get_meshes(file_bytes)
+    except Exception as exc:
+        st.warning(f"Die 3D-Geometrie konnte nicht berechnet werden: {exc}")
+        return
+    if not meshes:
+        st.info("Das Modell enthält keine darstellbare Geometrie.")
+        return
+
+    selected = st.session_state.get("sel3d", [])
+    value = viewer.select3d(meshes, selected, model_id=f"{file_name}:{len(file_bytes)}",
+                            focus=focus_on_select, transparency=transparency / 100)
+    if value and value.get("nonce") != st.session_state.get("select_nonce"):
+        st.session_state["select_nonce"] = value.get("nonce")
+        st.session_state["sel3d"] = list(value.get("ids", []))
+        follow_click(value.get("clicked"), set(current[COL_GLOBAL_ID]), file_bytes)
+        restart_editor()            # Häkchen in der Tabelle neu setzen
+        st.rerun()
+
+    if not selected:
+        st.caption(f"Bauteil im 3D anklicken (Ctrl+Klick für mehrere) oder Häkchen in der Spalte «{COL_SHOW}» setzen.")
+        return
+    props = [c for c in current.columns if c not in LOCKED_COLUMNS]
+    rows = current[current[COL_GLOBAL_ID].isin(selected)]
+    for _, row in rows.head(MAX_CARDS).iterrows():
+        with st.container(border=True):
+            st.markdown(f"**{row[COL_NAME] or 'ohne Name'}** · {row[COL_STOREY] or 'ohne Geschoss'} · {ifc_class}  \n"
+                        + " · ".join(f"{p}: **{_text(row[p])}**" for p in props))
+    if len(rows) > MAX_CARDS:
+        st.caption(f"… und {len(rows) - MAX_CARDS} weitere ausgewählte Bauteile.")
+    if len(selected) > len(rows):
+        st.caption(f"{len(selected) - len(rows)} ausgewählte(s) Bauteil(e) aus anderen Klassen, Psets oder Geschossen.")
+
+
+def follow_click(clicked: str | None, in_table: set, file_bytes: bytes) -> None:
+    """Angeklicktes Bauteil steht nicht in der Tabelle: auf seine Klasse, sein Pset und alle Geschosse wechseln."""
+    if not clicked or clicked in in_table:
+        return
+    info = get_properties(file_bytes).get(clicked)
+    if info is None:
+        return
+    st.session_state["ifc_class"] = info["cls"]
+    if st.session_state.get("pset") not in info["psets"] and info["psets"]:
+        st.session_state["pset"] = sorted(info["psets"])[0]
+    st.session_state["reset::edit_storey"] = True   # Geschossfilter erst beim nächsten Durchlauf zurücksetzen
+
+
+def _sync(widget_key: str, state_key: str) -> None:
+    st.session_state[state_key] = st.session_state[widget_key]
+
+
+def pick(label: str, options: list[str], state_key: str, widget_key: str, where=st):
+    """Auswahlfeld, das mit dem gleichen Feld im anderen Reiter gekoppelt ist.
+
+    Der gemeinsame Wert liegt in st.session_state[state_key]. Vor dem Zeichnen
+    bekommt das Feld diesen Wert, bei einer Änderung schreibt es ihn zurück.
+    So zeigen «Laden» und «Bearbeiten» immer dieselbe Klasse und dasselbe Pset.
+    """
+    if st.session_state.get(state_key) not in options:
+        st.session_state[state_key] = options[0]
+    st.session_state[widget_key] = st.session_state[state_key]
+    return where.selectbox(label, options, key=widget_key, on_change=_sync, args=(widget_key, state_key))
+
+
+def pick_class_and_pset(prefix: str):
+    """Die beiden gekoppelten Auswahlfelder. Gibt (Klasse, Pset oder None) zurück."""
+    col1, col2 = st.columns(2)
+    ifc_class = pick("Bauteilklasse", classes, "ifc_class", f"{prefix}_class", col1)
+    psets = ifc_reader.list_psets(model, ifc_class)
+    if not psets:
+        st.warning(f"Die Bauteile der Klasse {ifc_class} haben keine Property-Sets.")
+        return ifc_class, None
+    return ifc_class, pick("Property-Set", psets, "pset", f"{prefix}_pset", col2)
+
+
+def column_config_for(table: pd.DataFrame, raw: pd.DataFrame, pset_rules: dict) -> dict:
+    """Auswahlfelder in der Tabelle: Ja/Nein und Wertelisten aus den Regeln, sonst freier Text."""
+    config = {}
+    bools = set(bool_columns(raw)) | {p for p, r in pset_rules.items() if r.get("type") == "bool"}
+    for col in table.columns:
+        rule = pset_rules.get(col, {})
+        if col in bools:
+            config[col] = st.column_config.SelectboxColumn(col, options=[YES, NO])
+        elif rule.get("type") == "enum":
+            allowed = list(rule.get("values", []))
+            # Werte aus dem Modell, die nicht in der Liste stehen (z. B. EI45), bleiben sichtbar
+            extra = sorted({str(v) for v in table[col] if v is not None and not pd.isna(v)} - set(allowed))
+            config[col] = st.column_config.SelectboxColumn(
+                col, options=allowed + extra, help=f"Werteliste: {', '.join(allowed)}")
+        elif rule.get("type") == "float":
+            low, high = rule.get("min"), rule.get("max")
+            config[col] = st.column_config.TextColumn(col, help=f"Zahl zwischen {low} und {high}")
+        elif rule.get("type") == "pattern":
+            config[col] = st.column_config.TextColumn(col, help=f"Text nach Muster {rule.get('pattern')}")
+    return config
+
+
+def pick_storey(storeys: list[str], key: str, where=st) -> str:
+    """Geschossfilter. Gibt ALL_STOREYS oder ein Geschoss zurück."""
+    options = [ALL_STOREYS, *storeys]
+    if st.session_state.pop(f"reset::{key}", False) or st.session_state.get(key) not in options:
+        st.session_state[key] = ALL_STOREYS
+    return where.selectbox("Geschoss", options, key=key)
+
+
+def new_pset_form(file_bytes: bytes, ifc_class: str, store: dict) -> None:
+    """Formular: ein neues Property-Set für mehrere Bauteile einer Klasse vormerken."""
+    props = get_properties(file_bytes)
+    class_rules = rules_for_class(get_rules(), ifc_class)
+    elements = {g: p for g, p in props.items() if p["cls"] == ifc_class}
+    if not elements:
+        st.info(f"Im Modell gibt es keine Bauteile der Klasse {ifc_class}.")
+        return
+
+    c1, c2, c3 = st.columns([1.2, 1, 1])
+    template = c2.selectbox("Vorlage", ["— ohne Vorlage —", *class_rules], key=f"new_tpl::{ifc_class}",
+                            help="Property-Sets, für die in config/rules.json Regeln stehen")
+    from_rules = template in class_rules
+    name = c1.text_input("Name des neuen Property-Sets", value=template if from_rules else "",
+                         key=f"new_name::{ifc_class}::{template}", placeholder="z. B. CH_Brandschutz")
+    name = name.strip()
+    if name.startswith(("Pset_", "Qto_")) and name not in class_rules:
+        st.warning("Die Präfixe «Pset_» und «Qto_» sind für die Standard-Sets von buildingSMART reserviert. "
+                   "Für eigene Sets ein eigenes Präfix verwenden, zum Beispiel «CH_» oder ein Firmenkürzel.")
+
+    pset_rules = class_rules.get(name, {})
+    if from_rules:
+        start = pd.DataFrame([{"Property": p, "Typ": pending.RULE_KIND.get(r.get("type"), pending.KIND_TEXT), "Wert": None}
+                              for p, r in class_rules[template].items()])
+    else:
+        start = pd.DataFrame({"Property": [None] * 3, "Typ": [pending.KIND_TEXT] * 3, "Wert": [None] * 3})
+    st.write("**Properties** — eine Zeile pro Property. Der Wert gilt für alle gewählten Bauteile.")
+    rows = st.data_editor(
+        start, num_rows="dynamic", hide_index=True, key=f"new_rows::{ifc_class}::{template}",
+        column_config={
+            "Property": st.column_config.TextColumn("Property"),
+            "Typ": st.column_config.SelectboxColumn("Typ", options=pending.KINDS, required=True,
+                                                    help="Bestimmt den IFC-Typ: Text, Zahl (IfcReal), Ja/Nein (IfcBoolean)"),
+            "Wert": st.column_config.TextColumn("Wert"),
+        },
+    )
+    hints = [f"{p}: {', '.join(r['values'])}" for p, r in pset_rules.items() if r.get("type") == "enum"]
+    if hints:
+        st.caption("Wertelisten laut Regeln · " + " · ".join(hints))
+
+    without = [g for g, p in elements.items() if not name or name not in p["psets"]]
+    storey = pick_storey(sorted({elements[g]["storey"] for g in without}), f"new_storey::{ifc_class}", c3)
+    candidates = [g for g in without if storey == ALL_STOREYS or elements[g]["storey"] == storey]
+    label = lambda g: f"{elements[g]['name'] or 'ohne Name'} · {elements[g]['storey'] or 'ohne Geschoss'}"  # noqa: E731
+    targets = st.multiselect("Bauteile, die das neue Property-Set bekommen", candidates, default=candidates,
+                             format_func=label, key=f"new_targets::{ifc_class}::{name}::{storey}")
+    already = len(elements) - len(without)
+    if name and already:
+        st.caption(f"{already} Bauteil(e) haben «{name}» schon und fehlen in der Liste. "
+                   f"Ihre Werte änderst du im Modus «{MODE_EDIT}».")
+
+    if st.button(f"Property-Set bei {len(targets)} Bauteil(en) vormerken", type="primary",
+                 disabled=not name or not targets):
+        n, errors = pending.create_pset(
+            store, [(g, elements[g]["name"], ifc_class) for g in targets], name,
+            [(r["Property"], r["Typ"], r["Wert"]) for _, r in rows.iterrows()], pset_rules)
+        for message in errors:
+            st.error(message)
+        if not errors:
+            restart_editor()
+            st.success(f"{n} Werte vorgemerkt. Geprüft und gespeichert wird in «Prüfen» und «Speichern».")
 
 
 def reset_downstream() -> None:
@@ -49,9 +292,50 @@ def reset_downstream() -> None:
         st.session_state.pop(key, None)
 
 
+# Prüfregeln: rules.json, optional mit IDS-Datei (buildingSMART)
+with st.sidebar:
+    st.subheader("Prüfregeln")
+    ids_upload = st.file_uploader("IDS-Datei (optional)", type=["ids", "xml"],
+                                  help="Anforderungen nach dem Standard IDS von buildingSMART")
+    use_example_ids = EXAMPLE_IDS.exists() and st.checkbox("Beispiel-IDS aus config/ verwenden")
+    ids_bytes = ids_upload.getvalue() if ids_upload is not None else (EXAMPLE_IDS.read_bytes() if use_example_ids else None)
+    RULES, ids_info = base_rules(), None
+    if ids_bytes is not None:
+        try:
+            ids_rules, ids_notes, ids_info = read_ids(ids_bytes)
+        except ids_import.IdsError as exc:
+            st.error(str(exc))
+        else:
+            only_ids = st.checkbox("Nur Regeln aus der IDS", help="Sonst ergänzt die IDS config/rules.json und hat Vorrang.")
+            RULES = ids_rules if only_ids else merge_rules(base_rules(), ids_rules)
+            st.caption(f"IDS «{ids_info['title'] or 'ohne Titel'}»: {ids_info['rules']} Regeln aus "
+                       f"{ids_info['specifications']} Spezifikationen"
+                       + (f", für {' '.join(ids_info['ifc_versions'])}" if ids_info["ifc_versions"] else ""))
+            if ids_notes:
+                with st.expander(f"Nicht übernommen ({len(ids_notes)})"):
+                    for note in ids_notes:
+                        st.write("· " + note)
+    else:
+        st.caption("Regeln aus config/rules.json, ansehen und ändern im Reiter «Regeln»")
+    st.divider()
+
+# Einstellungen für den 3D-Viewer, gelten für die ganze Sitzung
+with st.sidebar:
+    st.subheader("3D-Ansicht")
+    show_3d = st.toggle("3D-Ansicht anzeigen", value=True)
+    focus_on_select = st.toggle(
+        "Beim Anwählen hinzoomen", value=True, disabled=not show_3d,
+        help="Die Kamera fährt zur Auswahl, der Rest des Modells wird transparent. "
+             "Ausgeschaltet bleibt die Auswahl orange markiert, die Kamera bleibt stehen.",
+    )
+    transparency = st.slider("Transparenz übriges Modell (%)", 0, 95, 85, step=5,
+                             disabled=not (show_3d and focus_on_select))
+    st.divider()
+
 st.title("IFC-Property-Editor")
 st.caption("Properties von IFC-Modellen im Browser ergänzen, prüfen und zurückschreiben")
-tab_load, tab_edit, tab_check, tab_save = st.tabs(["1  Laden", "2  Bearbeiten", "3  Prüfen", "4  Speichern"])
+tab_load, tab_edit, tab_3d, tab_check, tab_save, tab_rules = st.tabs(
+    ["1  Laden", "2  Bearbeiten", "3  3D-Modell", "4  Prüfen", "5  Speichern", "⚙  Regeln"])
 
 # =============================== 1 Laden =====================================
 with tab_load:
@@ -65,6 +349,7 @@ with tab_load:
         ifc_bytes, file_name = TEST_MODEL.read_bytes(), TEST_MODEL.name
 
     model = table = None
+    store = change_store((file_name, len(ifc_bytes)) if ifc_bytes is not None else None)
     if ifc_bytes is None:
         st.info("Noch keine Datei geladen.")
     else:
@@ -73,18 +358,13 @@ with tab_load:
         except Exception as exc:  # beschädigte oder ungültige Datei
             st.error(f"Die Datei konnte nicht gelesen werden: {exc}")
 
+    classes = ifc_reader.list_classes(model) if model is not None else []
     if model is not None:
-        classes = ifc_reader.list_classes(model)
         if not classes:
             st.warning("Im Modell wurden keine Bauteile gefunden.")
         else:
-            col1, col2 = st.columns(2)
-            ifc_class = col1.selectbox("Bauteilklasse", classes)
-            psets = ifc_reader.list_psets(model, ifc_class)
-            if not psets:
-                st.warning(f"Die Bauteile der Klasse {ifc_class} haben keine Property-Sets.")
-            else:
-                pset = col2.selectbox("Property-Set", psets)
+            ifc_class, pset = pick_class_and_pset("load")
+            if pset is not None:
                 context = (file_name, len(ifc_bytes), ifc_class, pset)
                 if st.session_state.get("context") != context:
                     st.session_state["context"] = context
@@ -101,57 +381,168 @@ with tab_load:
 
 # =============================== 2 Bearbeiten ================================
 edited = None
+selected_ids: list[str] = []
 with tab_edit:
-    if table is None:
-        st.info("Zuerst im Schritt «Laden» eine Datei, eine Klasse und ein Property-Set wählen.")
+    if not classes:
+        st.info("Zuerst im Schritt «Laden» eine Datei laden.")
     else:
-        st.write(f"**{ifc_class} · {pset}** — Werte direkt in der Tabelle ändern. "
-                 "GlobalId, Name und Geschoss sind gesperrt. Zelle leeren entfernt den Wert.")
-        # Ja/Nein-Properties als Auswahlfeld, alle anderen als freie Texteingabe
-        config = {col: st.column_config.SelectboxColumn(col, options=[YES, NO]) for col in bool_columns(raw_table)}
-        edited = st.data_editor(
-            table,
-            disabled=LOCKED_COLUMNS,
-            hide_index=True,
-            column_config=config,
-            num_rows="fixed",
-            key=f"editor::{'::'.join(map(str, st.session_state['context']))}",
-        )
+        mode = st.radio("Modus", [MODE_EDIT, MODE_NEW], horizontal=True, key="edit_mode", label_visibility="collapsed")
 
-# =============================== 3 Prüfen ====================================
+    if classes and mode == MODE_NEW:
+        st.caption("Ein Property-Set anlegen, das die gewählten Bauteile noch nicht haben.")
+        new_class = pick("Bauteilklasse", classes, "ifc_class", "new_class", st.columns(3)[0])
+        new_pset_form(ifc_bytes, new_class, store)
+
+    elif classes:
+        st.caption("Werte in einem Property-Set ändern, das die Bauteile schon haben.")
+        pick_class_and_pset("edit")   # dieselbe Auswahl wie in «Laden»
+        if table is None:
+            st.info(f"Die Klasse hat noch kein Property-Set. Eines im Modus «{MODE_NEW}» anlegen.")
+        else:
+            props_all = get_properties(ifc_bytes)
+            with_pset = {g for g, p in props_all.items() if pset in p["psets"]}
+            rows = table[table[COL_GLOBAL_ID].isin(with_pset)]
+            pset_rules = rules_for_class(get_rules(), ifc_class).get(pset, {})
+            added = [p for p in pset_rules if p not in rows.columns]
+            rows = add_columns(rows, added)          # Properties laut Regeln, die im Modell noch fehlen
+            storey = pick_storey(sorted({s for s in rows[COL_STOREY] if s}), "edit_storey", st.columns(3)[0])
+            view = rows if storey == ALL_STOREYS else rows[rows[COL_STOREY] == storey]
+
+            st.write(f"**{ifc_class} · {pset}** — {len(view)} Bauteil(e). Werte direkt in der Tabelle ändern. "
+                     "GlobalId, Name und Geschoss sind gesperrt. Zelle leeren entfernt den Wert.")
+            notes = []
+            if len(rows) < len(table):
+                notes.append(f"{len(table) - len(rows)} Bauteil(e) der Klasse haben dieses Property-Set nicht, "
+                             f"anlegen im Modus «{MODE_NEW}»")
+            if added:
+                notes.append(f"Spalten aus den Regeln, die im Modell noch fehlen: {', '.join(added)}")
+            if notes:
+                st.caption(" · ".join(notes))
+
+            left, right = st.columns([1.15, 1], gap="medium") if show_3d else (st.container(), None)
+            with left:
+                shown = pending.apply(view, store, pset)      # Tabelle mit den offenen Änderungen
+                config = column_config_for(shown, raw_table, pset_rules)
+                config[COL_SHOW] = st.column_config.CheckboxColumn(COL_SHOW, help="Bauteil im 3D-Viewer zeigen", width="small")
+                selection = st.session_state.setdefault("sel3d", [])
+                with_show = shown.copy()
+                with_show.insert(0, COL_SHOW, with_show[COL_GLOBAL_ID].isin(selection).astype(bool))
+                edited_full = st.data_editor(
+                    with_show,
+                    disabled=LOCKED_COLUMNS,
+                    hide_index=True,
+                    column_config=config,
+                    num_rows="fixed",
+                    key=f"editor::{'::'.join(map(str, st.session_state['context']))}::{storey}::{st.session_state['editor_rev']}",
+                )
+                checked = list(edited_full.loc[edited_full[COL_SHOW] == True, COL_GLOBAL_ID])  # noqa: E712
+                visible = set(edited_full[COL_GLOBAL_ID])
+                # Auswahl aus der Tabelle übernehmen, Auswahl ausserhalb der Tabelle bleibt
+                new_selection = [g for g in selection if g not in visible or g in checked]
+                new_selection += [g for g in checked if g not in new_selection]
+                st.session_state["sel3d"] = new_selection
+                selected_ids = new_selection
+                edited = edited_full.drop(columns=[COL_SHOW])   # die Häkchen sind keine Änderung am Modell
+                pending.merge_edits(store, view, shown, edited, ifc_class, pset)
+                others = sum(1 for (_, ps, _), e in store.items() if e[COL_CLASS] != ifc_class or ps != pset)
+                if others:
+                    st.caption(f"Dazu {others} offene Änderung(en) in anderen Klassen oder Property-Sets, siehe «Prüfen».")
+            if right is not None:
+                with right:
+                    show_3d_panel(ifc_bytes, edited, ifc_class)
+
+# =============================== 3 3D-Modell =================================
+with tab_3d:
+    if model is None:
+        st.info("Zuerst im Schritt «Laden» eine Datei laden.")
+    else:
+        try:
+            meshes = get_meshes(ifc_bytes)
+        except Exception as exc:
+            meshes = []
+            st.warning(f"Die 3D-Geometrie konnte nicht berechnet werden: {exc}")
+        if meshes:
+            props = get_properties(ifc_bytes)
+            checked_now = pending.validate_all(store, get_rules())
+            value = viewer.model3d(meshes, props, get_rules(), pending_for_viewer(store, checked_now),
+                                   model_id=f"{file_name}:{len(ifc_bytes)}", height=720)
+            # Neue Eingabe aus dem Pop-up in die gemeinsame Liste übernehmen
+            if value and value.get("nonce") != st.session_state.get("model3d_nonce"):
+                st.session_state["model3d_nonce"] = value.get("nonce")
+                info = props.get(value.get("guid"))
+                if info is not None:
+                    for c in value.get("changes", []):
+                        original = info["psets"].get(c["pset"], {}).get(c["prop"])
+                        new_value = c.get("value")
+                        # Wert eines neu angelegten Psets: Typ (Zahl, Ja/Nein) der Vormerkung beibehalten
+                        before = store.get((value["guid"], c["pset"], c["prop"]))
+                        if before is not None and original is None and not isinstance(before[COL_NEW], str):
+                            kind = pending.KIND_BOOL if isinstance(before[COL_NEW], bool) else pending.KIND_NUMBER
+                            try:
+                                new_value = pending.typed(new_value, kind)
+                            except ValueError:
+                                pass
+                        pending.put(store, value["guid"], info["name"], info["cls"], c["pset"], c["prop"],
+                                    original, new_value)
+                    restart_editor()
+                    st.rerun()
+            n_bad = int((~checked_now[COL_VALID].astype(bool)).sum()) if len(checked_now) else 0
+            c1, c2 = st.columns([3, 1])
+            c1.caption(f"Offene Änderungen: {len(store)}, davon {n_bad} mit Fehler. "
+                       "Bauteil anklicken, Werte im Fenster ändern, «Übernehmen». Geprüft und gespeichert wird in «Prüfen» und «Speichern».")
+            if store and c2.button("Alle offenen Änderungen verwerfen"):
+                store.clear()
+                restart_editor()
+                st.rerun()
+
+# =============================== 4 Prüfen ====================================
 validated = None
 with tab_check:
-    if edited is None:
-        st.info("Zuerst im Schritt «Bearbeiten» Werte ändern.")
+    st.subheader("Änderungen")
+    if not store:
+        st.info("Noch keine Änderungen. Werte im Schritt «Bearbeiten» oder im «3D-Modell» ändern.")
     else:
-        changes = diff.find_changes(table, edited, pset)
-        if changes.empty:
-            st.info("Noch keine Änderungen.")
-        else:
-            validated = validate(changes, ifc_class, get_rules())
-            # Ergebnis aus Schritt 4 verwerfen, sobald sich die Änderungen ändern
-            signature = validated.to_csv(index=False)
-            if st.session_state.get("validated_signature") != signature:
-                st.session_state["validated_signature"] = signature
-                reset_downstream()
-            n_ok = int(validated[COL_VALID].sum())
-            m1, m2, m3 = st.columns(3)
-            m1.metric("Änderungen", len(validated))
-            m2.metric("gültig", n_ok)
-            m3.metric("Fehler", len(validated) - n_ok)
-            for _, row in validated.iterrows():
-                old = "leer" if row[COL_OLD] is None else row[COL_OLD]
-                new = row[COL_NEW]
-                new = "leer" if new is None else (YES if new is True else NO if new is False else new)
-                text = f"**{row[COL_NAME]}** · {row[COL_PROPERTY]}: {old} → {new}"
-                if row[COL_VALID]:
-                    st.success(text + (f"  ·  {row[COL_MESSAGE]}" if row[COL_MESSAGE] else ""))
-                else:
-                    st.error(f"{text}  ·  {row[COL_MESSAGE]}")
-            if n_ok < len(validated):
-                st.caption("Fehlerhafte Änderungen werden nicht gespeichert. Im Schritt «Bearbeiten» korrigieren.")
+        validated = pending.validate_all(store, get_rules())
+        # Ergebnis aus Schritt 5 verwerfen, sobald sich die Änderungen ändern
+        signature = validated.to_csv(index=False)
+        if st.session_state.get("validated_signature") != signature:
+            st.session_state["validated_signature"] = signature
+            reset_downstream()
+        n_ok = int(validated[COL_VALID].sum())
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Änderungen", len(validated))
+        m2.metric("gültig", n_ok)
+        m3.metric("Fehler", len(validated) - n_ok)
+        for _, row in validated.iterrows():
+            old = "leer" if row[COL_OLD] is None else row[COL_OLD]
+            new = row[COL_NEW]
+            new = "leer" if new is None else (YES if new is True else NO if new is False else new)
+            text = f"**{row[COL_NAME]}** · {row[COL_PROPERTY]}: {old} → {new}"
+            where = f"  ·  {row[COL_CLASS]} · {row[COL_PSET]}"
+            if row[COL_VALID]:
+                st.success(text + (f"  ·  {row[COL_MESSAGE]}" if row[COL_MESSAGE] else "") + where)
+            else:
+                st.error(f"{text}  ·  {row[COL_MESSAGE]}{where}")
+        if n_ok < len(validated):
+            st.caption("Fehlerhafte Änderungen werden nicht gespeichert. In «Bearbeiten» oder im «3D-Modell» korrigieren.")
 
-# =============================== 4 Speichern =================================
+    if model is not None:
+        st.subheader("Modell gegen Regeln")
+        source = f"config/rules.json und IDS «{ids_info['title']}»" if ids_info else "config/rules.json"
+        st.caption(f"Alle Bauteile mit dem aktuellen Stand (Modell plus offene Änderungen), Regeln: {source}.")
+        issues = model_check.check_model(get_properties(ifc_bytes), get_rules(), store)
+        if issues.empty:
+            st.success("Alle Bauteile erfüllen die Regeln.")
+        else:
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Regelverstösse", len(issues))
+            c2.metric("betroffene Bauteile", issues[COL_GLOBAL_ID].nunique())
+            c3.metric("davon Pflichtwert fehlt", int(issues[model_check.COL_PROBLEM].str.startswith("Pflichtwert").sum()))
+            st.dataframe(issues.drop(columns=[COL_GLOBAL_ID]), hide_index=True)
+            st.caption("Korrigieren in «Bearbeiten» (Tabelle) oder im «3D-Modell» (Pop-up). "
+                       "Fehlt ein ganzes Property-Set: «Bearbeiten», Modus «Neues Pset anlegen».")
+
+# =============================== 5 Speichern =================================
 with tab_save:
     if validated is None or not validated[COL_VALID].any():
         st.info("Es gibt noch keine gültigen Änderungen zum Speichern.")
@@ -176,11 +567,79 @@ with tab_save:
             c2.download_button("Protokoll (CSV)", st.session_state["result_log"],
                                file_name=f"{stem}_protokoll.csv", mime="text/csv")
 
+# =============================== Regeln ======================================
+with tab_rules:
+    st.write("**Prüfregeln** aus `config/rules.json`, eine Zeile pro Property. Werte direkt in der Tabelle ändern, "
+             "unten eine Zeile hinzufügen, Zeilen links markieren und mit dem Papierkorb löschen. Erst «Regeln speichern» übernimmt.")
+    rules_rev = st.session_state.setdefault("rules_rev", 0)
+    current_rules = base_rules()
+    standard_rules = load_rules(STANDARD_RULES_PATH)
+    if message := st.session_state.pop("rules_message", None):
+        st.success(message)
+    diffs = rules_store.differences(current_rules, standard_rules)
+    if diffs:
+        with st.expander(f"{len(diffs)} Abweichung(en) von der Standardvorlage"):
+            for d in diffs:
+                st.write("· " + d)
+    else:
+        st.caption("Die Regeln entsprechen der Standardvorlage `config/rules_standard.json`.")
+    if ids_info:
+        st.info("Eine IDS-Datei ist aktiv. Ihre Regeln haben bei gleicher Property Vorrang und erscheinen hier nicht.")
+
+    labels = list(rules_store.TYPE_LABELS.values())
+    edited_rules = st.data_editor(
+        rules_store.rules_to_table(current_rules), num_rows="dynamic", hide_index=True, key=f"rules_editor::{rules_rev}",
+        column_config={
+            rules_store.COL_CLASS: st.column_config.TextColumn("Klasse", help="IFC-Klasse, z. B. IfcWall"),
+            rules_store.COL_PSET: st.column_config.TextColumn("Pset", help="Property-Set, z. B. Pset_WallCommon"),
+            rules_store.COL_PROP: st.column_config.TextColumn("Property", help="Name der Property, z. B. FireRating"),
+            rules_store.COL_TYPE: st.column_config.SelectboxColumn("Typ", options=labels, required=True),
+            rules_store.COL_VALUES: st.column_config.TextColumn(
+                "Werteliste", help="Bei Werteliste: erlaubte Werte mit Komma trennen. Bei Ja/Nein optional ein fester Wert."),
+            rules_store.COL_MIN: st.column_config.NumberColumn("Min", help="Bei Zahl: kleinster erlaubter Wert"),
+            rules_store.COL_MAX: st.column_config.NumberColumn("Max", help="Bei Zahl: grösster erlaubter Wert"),
+            rules_store.COL_PATTERN: st.column_config.TextColumn("Muster", help="Bei Muster: regulärer Ausdruck, z. B. VKF.*"),
+            rules_store.COL_REQUIRED: st.column_config.CheckboxColumn("Pflicht", help="Leer ist ein Fehler"),
+            rules_store.COL_NOTE: st.column_config.TextColumn("Hinweis", help="Erscheint als Hilfe im Pop-up"),
+        },
+    )
+    new_rules, rule_errors = rules_store.table_to_rules(edited_rules)
+    unsaved = not rule_errors and new_rules != current_rules
+    if unsaved:
+        st.caption("Es gibt ungespeicherte Änderungen.")
+
+    c1, c2, c3 = st.columns([1, 1.4, 1])
+    if c1.button("Regeln speichern", type="primary", disabled=not unsaved and not rule_errors):
+        if rule_errors:
+            for message in rule_errors:
+                st.error(message)
+        else:
+            rules_store.save_rules(new_rules)
+            base_rules.clear()
+            st.session_state["rules_rev"] = rules_rev + 1
+            st.session_state["rules_message"] = "Regeln gespeichert. Sie gelten ab sofort für Bearbeiten, Prüfen und das 3D-Modell."
+            st.rerun()
+    confirm = c2.checkbox("Eigene Regeln verwerfen", disabled=not diffs and not unsaved,
+                          help="Sicherung gegen versehentliches Zurücksetzen")
+    if c2.button("Auf Standard zurücksetzen", disabled=not confirm):
+        rules_store.reset_rules()
+        base_rules.clear()
+        st.session_state["rules_rev"] = rules_rev + 1
+        st.session_state["rules_message"] = "Regeln auf die Standardvorlage zurückgesetzt."
+        st.rerun()
+    c3.download_button("rules.json herunterladen",
+                       (json.dumps(current_rules, ensure_ascii=False, indent=2) + "\n").encode("utf-8"),
+                       file_name="rules.json", mime="application/json")
+    with st.expander("Standardvorlage ansehen (config/rules_standard.json)"):
+        st.dataframe(rules_store.rules_to_table(standard_rules), hide_index=True)
+
 # =============================== Seitenleiste ================================
 with st.sidebar:
     st.subheader("Status")
     st.write(f"Datei: {file_name or '—'}")
     if table is not None:
         st.write(f"Klasse: {ifc_class}  \nPset: {pset}")
+    if selected_ids:
+        st.write(f"Im 3D angewählt: {len(selected_ids)} Bauteil(e)")
     if validated is not None:
-        st.write(f"Änderungen: {len(validated)} · gültig: {int(validated[COL_VALID].sum())}")
+        st.write(f"Offene Änderungen: {len(validated)} · gültig: {int(validated[COL_VALID].sum())}")

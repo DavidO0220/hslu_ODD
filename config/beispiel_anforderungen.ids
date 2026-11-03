@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Beispiel-IDS für das Testmodell des IFC-Property-Editors.
+  Bildet die Regeln aus config/rules.json ab und ergänzt Pflichtwerte, einen
+  Zahlenbereich und ein Muster. Die letzte Spezifikation nutzt Funktionen, die
+  der Editor nicht prüft, und erscheint deshalb im Import-Bericht.
+  Aufbau nach IDS 1.0 (buildingSMART, Schema ids.xsd).
+-->
+<ids:ids xmlns:ids="http://standards.buildingsmart.org/IDS" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://standards.buildingsmart.org/IDS http://standards.buildingsmart.org/IDS/1.0/ids.xsd">
+  <ids:info>
+    <ids:title>Beispielanforderungen Brandschutz und Bauteile</ids:title>
+    <ids:description>Beispiel zum Testmodell. Brandschutzklassen nach VKF-Bezeichnung, Werte zur Veranschaulichung.</ids:description>
+    <ids:date>2026-11-03</ids:date>
+    <ids:purpose>Prüfregeln für den IFC-Property-Editor</ids:purpose>
+  </ids:info>
+  <ids:specifications>
+
+    <ids:specification name="Wände: Brandschutz und Tragwerk" ifcVersion="IFC2X3 IFC4">
+      <ids:applicability minOccurs="0" maxOccurs="unbounded">
+        <ids:entity>
+          <ids:name>
+            <xs:restriction base="xs:string">
+              <xs:enumeration value="IFCWALL"/>
+              <xs:enumeration value="IFCWALLSTANDARDCASE"/>
+            </xs:restriction>
+          </ids:name>
+        </ids:entity>
+      </ids:applicability>
+      <ids:requirements>
+        <ids:property dataType="IFCLABEL" cardinality="required" instructions="Feuerwiderstand nach VKF, z. B. EI60">
+          <ids:propertySet><ids:simpleValue>Pset_WallCommon</ids:simpleValue></ids:propertySet>
+          <ids:baseName><ids:simpleValue>FireRating</ids:simpleValue></ids:baseName>
+          <ids:value>
+            <xs:restriction base="xs:string">
+              <xs:enumeration value="EI30"/>
+              <xs:enumeration value="EI60"/>
+              <xs:enumeration value="EI90"/>
+            </xs:restriction>
+          </ids:value>
+        </ids:property>
+        <ids:property dataType="IFCBOOLEAN" cardinality="required">
+          <ids:propertySet><ids:simpleValue>Pset_WallCommon</ids:simpleValue></ids:propertySet>
+          <ids:baseName><ids:simpleValue>LoadBearing</ids:simpleValue></ids:baseName>
+        </ids:property>
+        <ids:property dataType="IFCBOOLEAN" cardinality="required">
+          <ids:propertySet><ids:simpleValue>Pset_WallCommon</ids:simpleValue></ids:propertySet>
+          <ids:baseName><ids:simpleValue>IsExternal</ids:simpleValue></ids:baseName>
+        </ids:property>
+        <ids:property dataType="IFCLABEL" cardinality="optional" instructions="Nachweis beginnt mit VKF">
+          <ids:propertySet><ids:simpleValue>CH_Brandschutz</ids:simpleValue></ids:propertySet>
+          <ids:baseName><ids:simpleValue>Nachweis</ids:simpleValue></ids:baseName>
+          <ids:value>
+            <xs:restriction base="xs:string">
+              <xs:pattern value="VKF.*"/>
+            </xs:restriction>
+          </ids:value>
+        </ids:property>
+      </ids:requirements>
+    </ids:specification>
+
+    <ids:specification name="Türen: Brandschutz" ifcVersion="IFC2X3 IFC4">
+      <ids:applicability minOccurs="0" maxOccurs="unbounded">
+        <ids:entity><ids:name><ids:simpleValue>IFCDOOR</ids:simpleValue></ids:name></ids:entity>
+      </ids:applicability>
+      <ids:requirements>
+        <ids:property dataType="IFCLABEL" cardinality="required">
+          <ids:propertySet><ids:simpleValue>Pset_DoorCommon</ids:simpleValue></ids:propertySet>
+          <ids:baseName><ids:simpleValue>FireRating</ids:simpleValue></ids:baseName>
+          <ids:value>
+            <xs:restriction base="xs:string">
+              <xs:enumeration value="EI30"/>
+              <xs:enumeration value="EI60"/>
+            </xs:restriction>
+          </ids:value>
+        </ids:property>
+      </ids:requirements>
+    </ids:specification>
+
+    <ids:specification name="Fenster: Wärmedurchgang" ifcVersion="IFC2X3 IFC4">
+      <ids:applicability minOccurs="0" maxOccurs="unbounded">
+        <ids:entity><ids:name><ids:simpleValue>IFCWINDOW</ids:simpleValue></ids:name></ids:entity>
+      </ids:applicability>
+      <ids:requirements>
+        <ids:property dataType="IFCTHERMALTRANSMITTANCEMEASURE" cardinality="required" instructions="U-Wert in W/m2K">
+          <ids:propertySet><ids:simpleValue>Pset_WindowCommon</ids:simpleValue></ids:propertySet>
+          <ids:baseName><ids:simpleValue>ThermalTransmittance</ids:simpleValue></ids:baseName>
+          <ids:value>
+            <xs:restriction base="xs:double">
+              <xs:minInclusive value="0.3"/>
+              <xs:maxInclusive value="1.3"/>
+            </xs:restriction>
+          </ids:value>
+        </ids:property>
+      </ids:requirements>
+    </ids:specification>
+
+    <ids:specification name="Treppen: Steigung" ifcVersion="IFC2X3 IFC4">
+      <ids:applicability minOccurs="0" maxOccurs="unbounded">
+        <ids:entity><ids:name><ids:simpleValue>IFCSTAIR</ids:simpleValue></ids:name></ids:entity>
+      </ids:applicability>
+      <ids:requirements>
+        <ids:property dataType="IFCPOSITIVELENGTHMEASURE" cardinality="required" instructions="Steigung in m">
+          <ids:propertySet><ids:simpleValue>Pset_StairCommon</ids:simpleValue></ids:propertySet>
+          <ids:baseName><ids:simpleValue>RiserHeight</ids:simpleValue></ids:baseName>
+          <ids:value>
+            <xs:restriction base="xs:double">
+              <xs:minInclusive value="0.15"/>
+              <xs:maxInclusive value="0.19"/>
+            </xs:restriction>
+          </ids:value>
+        </ids:property>
+      </ids:requirements>
+    </ids:specification>
+
+    <ids:specification name="Türen: Name nach Muster" ifcVersion="IFC4">
+      <ids:applicability minOccurs="0" maxOccurs="unbounded">
+        <ids:entity><ids:name><ids:simpleValue>IFCDOOR</ids:simpleValue></ids:name></ids:entity>
+      </ids:applicability>
+      <ids:requirements>
+        <ids:attribute>
+          <ids:name><ids:simpleValue>Name</ids:simpleValue></ids:name>
+          <ids:value><xs:restriction base="xs:string"><xs:pattern value="T[0-9]{3}.*"/></xs:restriction></ids:value>
+        </ids:attribute>
+      </ids:requirements>
+    </ids:specification>
+
+  </ids:specifications>
+</ids:ids>

@@ -1,9 +1,9 @@
 import pandas as pd
 
 from core.schema import CHANGE_COLUMNS
-from core.validator import check_value, load_rules, rules_for_class, validate
+from core.validator import check_value, load_rules, rules_for_class, validate, STANDARD_RULES_PATH
 
-RULES = load_rules()
+RULES = load_rules(STANDARD_RULES_PATH)
 
 
 def _changes(*rows):

@@ -5,7 +5,7 @@ from core.schema import FIXED_COLUMNS
 
 
 def test_classes(model):
-    assert ifc_reader.list_classes(model) == ["IfcDoor", "IfcSlab", "IfcWall"]
+    assert ifc_reader.list_classes(model) == ["IfcDoor", "IfcSlab", "IfcStair", "IfcWall", "IfcWindow"]
 
 
 def test_psets_for_walls(model):
@@ -39,3 +39,17 @@ def test_booleans_are_booleans(model):
 def test_load_from_bytes(model_path):
     loaded = ifc_reader.load_model(model_path.read_bytes())
     assert len(loaded.by_type("IfcWall")) == 15
+
+
+def test_openings_are_not_listed(model):
+    assert len(model.by_type("IfcOpeningElement")) > 0
+    assert "IfcOpeningElement" not in ifc_reader.list_classes(model)
+
+
+def test_windows_and_stair(model):
+    windows = ifc_reader.to_table(model, "IfcWindow", "Pset_WindowCommon")
+    assert len(windows) == 6
+    assert windows["ThermalTransmittance"].isna().sum() == 1
+    stair = ifc_reader.to_table(model, "IfcStair", "Pset_StairCommon")
+    assert len(stair) == 1
+    assert abs(stair["TreadLength"].iloc[0] - 0.27) < 1e-9

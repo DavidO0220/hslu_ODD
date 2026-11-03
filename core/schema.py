@@ -23,6 +23,10 @@ COL_OLD = "Alt"
 COL_NEW = "Neu"
 CHANGE_COLUMNS = [COL_GLOBAL_ID, COL_NAME, COL_PSET, COL_PROPERTY, COL_OLD, COL_NEW]
 
+# Gemeinsame Änderungsliste (core/pending.py): zusätzlich die Bauteilklasse,
+# weil Änderungen aus mehreren Klassen zusammenkommen (Tabelle und 3D-Viewer)
+COL_CLASS = "Klasse"
+
 # Vom Validator ergänzt
 COL_VALID = "Gueltig"
 COL_MESSAGE = "Meldung"

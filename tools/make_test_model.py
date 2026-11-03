@@ -9,9 +9,13 @@ was herauskommen muss:
     - 1 Wand mit dem ungültigen Wert "EI45"
 - 3 Decken (IfcSlab) mit Pset_SlabCommon
 - 3 Türen (IfcDoor) mit Pset_DoorCommon, davon 1 ohne FireRating
+- 6 Fenster (IfcWindow) mit Pset_WindowCommon, davon 1 ohne ThermalTransmittance
+- 1 Treppe (IfcStair) vom EG ins 1. OG mit Pset_StairCommon
 
-Wände und Decken haben eine einfache Geometrie (Quader), damit man das Modell
-in einem BIM-Viewer ansehen kann. Türen haben keine Geometrie.
+Alle Bauteile haben eine einfache Geometrie aus Quadern, damit der 3D-Viewer
+etwas anzeigen kann. Türen und Fenster sitzen in Öffnungen (IfcOpeningElement),
+die aus den Wänden ausgeschnitten werden. Die Treppe führt durch eine Öffnung
+in der Decke über dem EG.
 
 Das Skript verwendet nur die Grundfunktionen von IfcOpenShell
 (ifcopenshell.file, create_entity, guid.new). Diese sind über alle Versionen
@@ -51,7 +55,20 @@ FIRE_RATING_EXCEPTIONS = {
 DEFAULT_OUTER_FIRE_RATING = "EI90"
 
 SLAB_NAMES = ["Bodenplatte", "Decke über EG", "Decke über 1. OG"]
+
+# Tür in der Innenwand (x = 5 m), 0.9 m breit, ab y = 2 m
 DOOR_FIRE_RATINGS = ["EI30", None, "EI30"]
+DOOR_START_Y, DOOR_WIDTH, DOOR_HEIGHT = 2.0, 0.9, 2.1
+
+# Fenster in der Südwand (y = 0): (Name, Start x). Brüstung 0.9 m, 1.2 x 1.4 m
+WINDOWS = [("Fenster Süd 1", 2.0), ("Fenster Süd 2", 6.5)]
+WINDOW_WIDTH, WINDOW_HEIGHT, WINDOW_SILL = 1.2, 1.4, 0.9
+WINDOW_U_VALUE = 0.9                                  # W/m2K
+WINDOW_U_MISSING = {(2, "Fenster Süd 2")}             # ohne U-Wert (leer)
+
+# Gerade Treppe im Westraum vom EG ins 1. OG: 17 Steigungen, 16 Auftritte
+STAIR_X, STAIR_Y, STAIR_WIDTH = 0.5, 1.5, 1.1
+STAIR_RISERS, STAIR_TREAD = 17, 0.27
 
 
 class ModelBuilder:
@@ -87,8 +104,8 @@ class ModelBuilder:
             "IfcLocalPlacement", PlacementRelTo=relative_to, RelativePlacement=self.axis3(x, y, z, dx, dy)
         )
 
-    def box(self, context, x_dim, y_dim, depth, center_x, center_y):
-        """Quader als extrudiertes Rechteck."""
+    def solid(self, x_dim, y_dim, depth, center_x, center_y):
+        """Quader als extrudiertes Rechteck (Grundfläche bei z = 0)."""
         profile = self.f.create_entity(
             "IfcRectangleProfileDef",
             ProfileType="AREA",
@@ -103,14 +120,33 @@ class ModelBuilder:
             ExtrudedDirection=self.direction(0, 0, 1),
             Depth=float(depth),
         )
+        return solid
+
+    def shape(self, context, solids):
+        """Körperdarstellung aus einem oder mehreren Quadern."""
         rep = self.f.create_entity(
             "IfcShapeRepresentation",
             ContextOfItems=context,
             RepresentationIdentifier="Body",
             RepresentationType="SweptSolid",
-            Items=[solid],
+            Items=list(solids),
         )
         return self.f.create_entity("IfcProductDefinitionShape", Representations=[rep])
+
+    def box(self, context, x_dim, y_dim, depth, center_x, center_y):
+        """Ein einzelner Quader als Körperdarstellung."""
+        return self.shape(context, [self.solid(x_dim, y_dim, depth, center_x, center_y)])
+
+    def opening(self, host, placement, representation, name):
+        """Öffnung, die aus dem Bauteil host ausgeschnitten wird."""
+        opening = self.root("IfcOpeningElement", Name=name, ObjectPlacement=placement,
+                            Representation=representation, PredefinedType="OPENING")
+        self.root("IfcRelVoidsElement", RelatingBuildingElement=host, RelatedOpeningElement=opening)
+        return opening
+
+    def fill(self, opening, element):
+        """Tür oder Fenster sitzt in der Öffnung."""
+        self.root("IfcRelFillsElement", RelatingOpeningElement=opening, RelatedBuildingElement=element)
 
     # --- Beziehungen und Properties ---------------------------------------
     def aggregate(self, parent, children):
@@ -125,7 +161,9 @@ class ModelBuilder:
         for prop_name, value in values.items():
             if value is None:
                 continue
-            if isinstance(value, bool):
+            if isinstance(value, tuple):          # (IFC-Typ, Wert), z. B. ("IfcPositiveLengthMeasure", 0.27)
+                nominal = self.f.create_entity(value[0], value[1])
+            elif isinstance(value, bool):
                 nominal = self.f.create_entity("IfcBoolean", value)
             elif isinstance(value, float):
                 nominal = self.f.create_entity("IfcReal", value)
@@ -196,6 +234,7 @@ def build(path: Path = DEFAULT_PATH) -> Path:
         contained.append(slab)
 
         # Wände
+        walls = {}
         for name, (x, y), (dx, dy), length, thickness, outer in WALL_LAYOUT:
             wall = b.root(
                 "IfcWall",
@@ -207,18 +246,83 @@ def build(path: Path = DEFAULT_PATH) -> Path:
             fire = FIRE_RATING_EXCEPTIONS.get((i, name), DEFAULT_OUTER_FIRE_RATING if outer else "EI30")
             b.pset(wall, "Pset_WallCommon", {"IsExternal": outer, "LoadBearing": outer, "FireRating": fire})
             contained.append(wall)
+            walls[name] = wall
 
-        # Tür (ohne Geometrie)
+        # Tür in der Innenwand, mit Öffnung
+        door_pl = b.placement(storey_pl, 5.0, DOOR_START_Y, SLAB_THICKNESS, 0.0, 1.0)
         door = b.root(
             "IfcDoor",
             Name="Tür Treppenhaus",
-            ObjectPlacement=b.placement(storey_pl, 5.0, 2.0, SLAB_THICKNESS),
-            OverallHeight=2.1,
-            OverallWidth=0.9,
+            ObjectPlacement=door_pl,
+            Representation=b.box(body_ctx, DOOR_WIDTH, 0.05, DOOR_HEIGHT, DOOR_WIDTH / 2, 0.0),
+            OverallHeight=DOOR_HEIGHT,
+            OverallWidth=DOOR_WIDTH,
             PredefinedType="DOOR",
         )
+        door_opening = b.opening(
+            walls["Innenwand 120"],
+            b.placement(storey_pl, 5.0, DOOR_START_Y, SLAB_THICKNESS, 0.0, 1.0),
+            b.box(body_ctx, DOOR_WIDTH, 0.4, DOOR_HEIGHT, DOOR_WIDTH / 2, 0.0),
+            "Öffnung Tür",
+        )
+        b.fill(door_opening, door)
         b.pset(door, "Pset_DoorCommon", {"IsExternal": False, "FireRating": DOOR_FIRE_RATINGS[i]})
         contained.append(door)
+
+        # Fenster in der Südwand, mit Öffnungen
+        for win_name, start_x in WINDOWS:
+            z = SLAB_THICKNESS + WINDOW_SILL
+            window = b.root(
+                "IfcWindow",
+                Name=win_name,
+                ObjectPlacement=b.placement(storey_pl, start_x, 0.0, z),
+                Representation=b.box(body_ctx, WINDOW_WIDTH, 0.08, WINDOW_HEIGHT, WINDOW_WIDTH / 2, 0.0),
+                OverallHeight=WINDOW_HEIGHT,
+                OverallWidth=WINDOW_WIDTH,
+                PredefinedType="WINDOW",
+            )
+            win_opening = b.opening(
+                walls["Aussenwand Süd 300"],
+                b.placement(storey_pl, start_x, 0.0, z),
+                b.box(body_ctx, WINDOW_WIDTH, 0.5, WINDOW_HEIGHT, WINDOW_WIDTH / 2, 0.0),
+                "Öffnung Fenster",
+            )
+            b.fill(win_opening, window)
+            u_value = None if (i, win_name) in WINDOW_U_MISSING else ("IfcThermalTransmittanceMeasure", WINDOW_U_VALUE)
+            b.pset(window, "Pset_WindowCommon", {"IsExternal": True, "ThermalTransmittance": u_value})
+            contained.append(window)
+
+        # Treppe vom EG ins 1. OG und Öffnung in der Decke darüber
+        if i == 0:
+            riser = round(STOREYS[1][1] / STAIR_RISERS, 4)
+            steps = [
+                b.solid(STAIR_WIDTH, STAIR_TREAD, (k + 1) * riser, STAIR_WIDTH / 2, (k + 0.5) * STAIR_TREAD)
+                for k in range(STAIR_RISERS - 1)
+            ]
+            stair = b.root(
+                "IfcStair",
+                Name="Treppe EG bis 1. OG",
+                ObjectPlacement=b.placement(storey_pl, STAIR_X, STAIR_Y, SLAB_THICKNESS),
+                Representation=b.shape(body_ctx, steps),
+                PredefinedType="STRAIGHT_RUN_STAIR",
+            )
+            b.pset(stair, "Pset_StairCommon", {
+                "IsExternal": False,
+                "FireRating": "R30",
+                "RiserHeight": ("IfcPositiveLengthMeasure", riser),
+                "TreadLength": ("IfcPositiveLengthMeasure", STAIR_TREAD),
+            })
+            contained.append(stair)
+        if i == 1:
+            run = (STAIR_RISERS - 1) * STAIR_TREAD
+            hole_start = STAIR_Y + 3 * STAIR_TREAD - 0.2
+            hole_len = STAIR_Y + run - hole_start
+            b.opening(
+                slab,
+                b.placement(storey_pl, STAIR_X - 0.1, hole_start, -0.05),
+                b.box(body_ctx, STAIR_WIDTH + 0.2, hole_len, SLAB_THICKNESS + 0.1, (STAIR_WIDTH + 0.2) / 2, hole_len / 2),
+                "Öffnung Treppe",
+            )
 
         b.contain(storey, contained)
 
@@ -232,5 +336,5 @@ if __name__ == "__main__":
     out = build()
     model = ifcopenshell.open(str(out))
     print(f"Testmodell geschrieben: {out}")
-    for cls in ("IfcBuildingStorey", "IfcWall", "IfcSlab", "IfcDoor"):
+    for cls in ("IfcBuildingStorey", "IfcWall", "IfcSlab", "IfcDoor", "IfcWindow", "IfcStair", "IfcOpeningElement"):
         print(f"  {cls}: {len(model.by_type(cls))}")
